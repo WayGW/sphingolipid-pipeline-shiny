@@ -1,13 +1,13 @@
 """
-Data Processing Module for Bile Acid Analysis
-===============================================
+Data Processing Module for Sphingolipid Analysis
+=================================================
 
 Handles:
 1. Loading data from Excel/ODS files
 2. Detecting and parsing data structure
 3. Data cleaning (handling LOD, missing values)
 4. Normalization and calculations
-5. Aggregation by bile acid groups
+5. Aggregation by sphingolipid groups
 """
 
 import pandas as pd
@@ -18,13 +18,13 @@ from dataclasses import dataclass, field
 import re
 import warnings
 
-# Import bile acid configuration
+# Import sphingolipid configuration
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config.bile_acid_species import (
-    BILE_ACID_PANEL, ANALYSIS_GROUPS, CLINICAL_RATIOS,
+from config.sphingolipid_species import (
+    SPHINGOLIPID_PANEL, ANALYSIS_GROUPS, CLINICAL_RATIOS,
     get_all_species, validate_columns, get_species_info,
-    Conjugation, Origin
+    SphingoClass, ChainLength
 )
 
 
@@ -36,18 +36,18 @@ class DataStructureInfo:
     sample_id_col: Optional[str] = None
     group_col: Optional[str] = None
     other_metadata_cols: List[str] = field(default_factory=list)
-    bile_acid_cols: List[str] = field(default_factory=list)
+    sphingolipid_cols: List[str] = field(default_factory=list)
     unrecognized_cols: List[str] = field(default_factory=list)
     has_standards: bool = False
     standard_rows: List[int] = field(default_factory=list)
     data_start_row: int = 0
-    units: str = "nmol/L"
+    units: str = "ng/mL"
     sheet_used: Optional[str] = None  # Which sheet the data was loaded from
 
 
 @dataclass
 class ProcessedData:
-    """Container for processed bile acid data."""
+    """Container for processed sphingolipid data."""
     # Core data
     raw_data: pd.DataFrame
     sample_data: pd.DataFrame  # Samples only, no standards
@@ -56,21 +56,21 @@ class ProcessedData:
     structure: DataStructureInfo
     
     # Calculated values
-    concentrations: pd.DataFrame  # Individual BA concentrations
-    percentages: pd.DataFrame     # % of total for each BA
-    totals: pd.DataFrame          # Group totals (conjugated, primary, etc.)
-    ratios: pd.DataFrame          # Clinical ratios
+    concentrations: pd.DataFrame  # Individual sphingolipid concentrations
+    percentages: pd.DataFrame     # % of total for each sphingolipid
+    totals: pd.DataFrame          # Group totals (ceramides, SM, etc.)
+    ratios: pd.DataFrame          # Clinical/research ratios
     
     # Summary statistics by group
     group_summaries: Optional[Dict[str, pd.DataFrame]] = None
 
 
-class BileAcidDataProcessor:
+class SphingolipidDataProcessor:
     """
-    Process bile acid LC-MS data from Excel files.
+    Process sphingolipid LC-MS data from Excel files.
     
     Usage:
-        processor = BileAcidDataProcessor()
+        processor = SphingolipidDataProcessor()
         processed = processor.load_and_process("data.xlsx")
     """
     
@@ -102,7 +102,7 @@ class BileAcidDataProcessor:
         self,
         lod_handling: str = "zero",  # "zero", "half_min", "drop"
         lod_value: float = 0.1,  # Default LOD value for ratio calculations
-        custom_bile_acids: Optional[Dict] = None
+        custom_sphingolipids: Optional[Dict] = None
     ):
         """
         Initialize the processor.
@@ -113,15 +113,15 @@ class BileAcidDataProcessor:
                 - "half_min": Replace with half the minimum detected value
                 - "drop": Keep as NaN
             lod_value: Limit of detection value (used for ratio calculations)
-            custom_bile_acids: Additional bile acid definitions to merge with panel
+            custom_sphingolipids: Additional sphingolipid definitions to merge with panel
         """
         self.lod_handling = lod_handling
         self.lod_value = lod_value
         
-        # Merge custom BAs if provided
-        self.bile_acid_panel = BILE_ACID_PANEL.copy()
-        if custom_bile_acids:
-            self.bile_acid_panel.update(custom_bile_acids)
+        # Merge custom sphingolipids if provided
+        self.sphingolipid_panel = SPHINGOLIPID_PANEL.copy()
+        if custom_sphingolipids:
+            self.sphingolipid_panel.update(custom_sphingolipids)
     
     # Preferred sheet names for processed data (in order of preference)
     PREFERRED_SHEET_PATTERNS = [
@@ -131,6 +131,8 @@ class BileAcidDataProcessor:
         r'corrected',
         r'final',
         r'results',
+        r'dry[\s_-]*(content|fecal)',
+        r'liver',
     ]
     
     def load_file(
@@ -184,15 +186,12 @@ class BileAcidDataProcessor:
         Prefers sheets like 'Serum C' over raw 'LC-MS data'.
         Avoids sheets that look like analysis output (Overview, Report, etc.)
         """
-        # Sheets to avoid (analysis output sheets)
+        # Sheets to avoid (analysis output sheets or raw data)
         avoid_patterns = [
             r'overview',
             r'report',
             r'summary',
-            r'total[\s_-]*(all|primary|secondary|conjugated)',
-            r'glycine',
-            r'taurine',
-            r'sulfated',
+            r'lc[\s_-]*ms[\s_-]*data',  # Raw LC-MS data sheet
         ]
         
         # Filter out sheets to avoid
@@ -250,12 +249,12 @@ class BileAcidDataProcessor:
         Identifies:
         - Header row
         - Sample ID and group columns
-        - Bile acid columns
+        - Sphingolipid columns
         - Standard/calibration rows
         """
         info = DataStructureInfo(n_rows=len(df), n_cols=len(df.columns))
         
-        # Find header row (row containing bile acid names)
+        # Find header row (row containing sphingolipid names)
         header_row = self._find_header_row(df)
         info.data_start_row = header_row + 1
         
@@ -267,14 +266,14 @@ class BileAcidDataProcessor:
                 # Check if row above has units info
                 prev_row = df.iloc[header_row - 1].astype(str).tolist()
                 for i, (h, p) in enumerate(zip(headers, prev_row)):
-                    if 'nmol' in str(p).lower() or 'conc' in str(p).lower():
+                    if 'ng' in str(p).lower() or 'conc' in str(p).lower():
                         info.units = str(p)
                         break
         else:
             headers = [f"col_{i}" for i in range(len(df.columns))]
         
         # Classify columns
-        known_bas = set(self.bile_acid_panel.keys())
+        known_species = set(self.sphingolipid_panel.keys())
         
         for i, col in enumerate(headers):
             col_str = str(col).strip()
@@ -290,16 +289,16 @@ class BileAcidDataProcessor:
                 info.group_col = col_str
                 continue
             
-            # Check for bile acid
-            if col_str in known_bas:
-                info.bile_acid_cols.append(col_str)
+            # Check for sphingolipid
+            if col_str in known_species:
+                info.sphingolipid_cols.append(col_str)
             elif col_str not in ['nan', '', 'NaN', 'None']:
                 # Check for partial matches (handle slight naming variations)
                 matched = False
-                for ba in known_bas:
+                for sp in known_species:
                     if col_str.replace('_', '').replace('-', '').lower() == \
-                       ba.replace('_', '').replace('-', '').lower():
-                        info.bile_acid_cols.append(ba)
+                       sp.replace('_', '').replace('-', '').lower():
+                        info.sphingolipid_cols.append(sp)
                         matched = True
                         break
                 
@@ -322,13 +321,13 @@ class BileAcidDataProcessor:
         return info
     
     def _find_header_row(self, df: pd.DataFrame) -> int:
-        """Find the row containing column headers (bile acid names)."""
-        known_bas = set(self.bile_acid_panel.keys())
+        """Find the row containing column headers (sphingolipid names)."""
+        known_species = set(self.sphingolipid_panel.keys())
         
         for idx in range(min(10, len(df))):  # Check first 10 rows
             row_vals = set(str(v).strip() for v in df.iloc[idx].values if pd.notna(v))
-            matches = row_vals & known_bas
-            if len(matches) >= 3:  # At least 3 bile acid names
+            matches = row_vals & known_species
+            if len(matches) >= 3:  # At least 3 sphingolipid names
                 return idx
         
         return 0  # Default to first row
@@ -378,7 +377,7 @@ class BileAcidDataProcessor:
             df = df.drop(index=adjusted_std_rows).reset_index(drop=True)
         
         # Handle LOD values and convert to numeric
-        for col in structure.bile_acid_cols:
+        for col in structure.sphingolipid_cols:
             if col in df.columns:
                 df[col] = self._clean_numeric_column(df[col], structure)
         
@@ -444,20 +443,20 @@ class BileAcidDataProcessor:
     def calculate_totals(
         self, 
         df: pd.DataFrame,
-        bile_acid_cols: List[str]
+        sphingolipid_cols: List[str]
     ) -> pd.DataFrame:
-        """Calculate aggregate totals for bile acid groups."""
+        """Calculate aggregate totals for sphingolipid groups."""
         totals = pd.DataFrame(index=df.index)
         
         # Get available columns
-        available_cols = set(df.columns) & set(bile_acid_cols)
+        available_cols = set(df.columns) & set(sphingolipid_cols)
         
         for group_name, species_list in ANALYSIS_GROUPS.items():
             cols_in_group = [c for c in species_list if c in available_cols]
             if cols_in_group:
                 totals[group_name] = df[cols_in_group].sum(axis=1)
         
-        # Total of all bile acids
+        # Total of all sphingolipids
         totals['total_all'] = df[list(available_cols)].sum(axis=1)
         
         return totals
@@ -465,10 +464,10 @@ class BileAcidDataProcessor:
     def calculate_percentages(
         self, 
         df: pd.DataFrame,
-        bile_acid_cols: List[str]
+        sphingolipid_cols: List[str]
     ) -> pd.DataFrame:
-        """Calculate percentage of total for each bile acid."""
-        available_cols = [c for c in bile_acid_cols if c in df.columns]
+        """Calculate percentage of total for each sphingolipid."""
+        available_cols = [c for c in sphingolipid_cols if c in df.columns]
         
         total = df[available_cols].sum(axis=1)
         
@@ -481,23 +480,23 @@ class BileAcidDataProcessor:
     def calculate_ratios(
         self, 
         df: pd.DataFrame,
-        bile_acid_cols: List[str],
+        sphingolipid_cols: List[str],
         lod_value: float = 0.1
     ) -> pd.DataFrame:
         """
-        Calculate clinical ratios.
+        Calculate clinical/research ratios.
         
         Note: Below-LOD values should already be replaced with LOD value
         during data cleaning. This function handles any remaining zeros
         as a safety measure.
         
         Args:
-            df: DataFrame with bile acid concentrations
-            bile_acid_cols: List of bile acid column names
+            df: DataFrame with sphingolipid concentrations
+            sphingolipid_cols: List of sphingolipid column names
             lod_value: Fallback LOD value if denominator is still zero
         """
         ratios = pd.DataFrame(index=df.index)
-        available_cols = set(df.columns) & set(bile_acid_cols)
+        available_cols = set(df.columns) & set(sphingolipid_cols)
         
         for ratio_name, ratio_def in CLINICAL_RATIOS.items():
             num_cols = [c for c in ratio_def['numerator'] if c in available_cols]
@@ -560,7 +559,7 @@ class BileAcidDataProcessor:
         group_col: Optional[str] = None
     ) -> ProcessedData:
         """
-        Main entry point: load and fully process a bile acid data file.
+        Main entry point: load and fully process a sphingolipid data file.
         
         Args:
             filepath: Path to Excel/ODS file
@@ -589,19 +588,19 @@ class BileAcidDataProcessor:
         # Extract sample data (with metadata)
         sample_df = clean_df.copy()
         
-        # Get concentration data (only BA columns)
-        ba_cols = [c for c in structure.bile_acid_cols if c in sample_df.columns]
-        concentrations = sample_df[ba_cols].copy()
+        # Get concentration data (only sphingolipid columns)
+        sl_cols = [c for c in structure.sphingolipid_cols if c in sample_df.columns]
+        concentrations = sample_df[sl_cols].copy()
         
         # Calculate derived values
-        percentages = self.calculate_percentages(sample_df, ba_cols)
-        totals = self.calculate_totals(sample_df, ba_cols)
-        ratios = self.calculate_ratios(sample_df, ba_cols, lod_value=self.lod_value)
+        percentages = self.calculate_percentages(sample_df, sl_cols)
+        totals = self.calculate_totals(sample_df, sl_cols)
+        ratios = self.calculate_ratios(sample_df, sl_cols, lod_value=self.lod_value)
         
         # Group summaries if group column exists
         group_summaries = None
         if structure.group_col and structure.group_col in sample_df.columns:
-            all_value_cols = ba_cols + list(totals.columns) + list(ratios.columns)
+            all_value_cols = sl_cols + list(totals.columns) + list(ratios.columns)
             
             # Merge for summary calculation
             full_df = pd.concat([sample_df, totals, ratios], axis=1)
@@ -650,7 +649,7 @@ def validate_data_quality(processed: ProcessedData) -> Dict[str, Any]:
     """
     report = {
         'n_samples': len(processed.sample_data),
-        'n_bile_acids_detected': len(processed.structure.bile_acid_cols),
+        'n_sphingolipids_detected': len(processed.structure.sphingolipid_cols),
         'n_unrecognized_cols': len(processed.structure.unrecognized_cols),
         'unrecognized_cols': processed.structure.unrecognized_cols,
         'group_col_detected': processed.structure.group_col,
@@ -665,8 +664,8 @@ def validate_data_quality(processed: ProcessedData) -> Dict[str, Any]:
         report['groups'] = list(groups)
         report['n_groups'] = len(groups)
     
-    # Missing data per BA
-    for col in processed.structure.bile_acid_cols:
+    # Missing data per sphingolipid
+    for col in processed.structure.sphingolipid_cols:
         if col in processed.concentrations.columns:
             n_missing = processed.concentrations[col].isna().sum()
             n_zero = (processed.concentrations[col] == 0).sum()
@@ -689,25 +688,25 @@ if __name__ == "__main__":
         # Create synthetic demo data
         np.random.seed(42)
         demo_data = pd.DataFrame({
-            'Type': ['HD']*5 + ['AC']*5,
+            'Type': ['Control']*5 + ['Treatment']*5,
             'Sample_ID': [f'S{i}' for i in range(10)],
-            'TCA': np.random.lognormal(4, 1, 10),
-            'GCA': np.random.lognormal(5, 1, 10),
-            'TCDCA': np.random.lognormal(4.5, 1, 10),
-            'GCDCA': np.random.lognormal(5.5, 1, 10),
-            'CA': np.random.lognormal(3, 1, 10),
-            'CDCA': np.random.lognormal(4, 1, 10),
-            'DCA': np.random.lognormal(3.5, 1, 10),
-            'LCA': np.random.lognormal(2, 1, 10),
+            'C16 Cer': np.random.lognormal(4, 1, 10),
+            'C18-0 Cer': np.random.lognormal(3, 1, 10),
+            'C24-0 Cer': np.random.lognormal(5, 1, 10),
+            'C24-1 Cer': np.random.lognormal(4.5, 1, 10),
+            'C16-SM': np.random.lognormal(6, 1, 10),
+            'C18-SM': np.random.lognormal(5.5, 1, 10),
+            'S1P-d18-1': np.random.lognormal(2, 1, 10),
+            'S-d18-1': np.random.lognormal(2.5, 1, 10),
         })
         
         # Save to temp file
-        demo_path = '/tmp/demo_ba_data.xlsx'
+        demo_path = '/tmp/demo_sphingolipid_data.xlsx'
         demo_data.to_excel(demo_path, index=False)
         filepath = demo_path
     
     # Process file
-    processor = BileAcidDataProcessor()
+    processor = SphingolipidDataProcessor()
     processed = processor.load_and_process(filepath)
     
     # Print report
@@ -717,7 +716,7 @@ if __name__ == "__main__":
     
     quality = validate_data_quality(processed)
     print(f"\nSamples: {quality['n_samples']}")
-    print(f"Bile acids detected: {quality['n_bile_acids_detected']}")
+    print(f"Sphingolipids detected: {quality['n_sphingolipids_detected']}")
     print(f"Group column: {quality['group_col_detected']}")
     print(f"Groups: {quality['groups']}")
     

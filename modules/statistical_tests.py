@@ -1,6 +1,6 @@
 """
-Statistical Testing Module for Bile Acid Analysis
-==================================================
+Statistical Testing Module for Sphingolipid Analysis
+=====================================================
 
 This module handles:
 1. Assumption testing (normality, homoscedasticity)
