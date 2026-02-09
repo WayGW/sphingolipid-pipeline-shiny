@@ -1,6 +1,6 @@
 """
-Visualization Module for Bile Acid Analysis
-=============================================
+Visualization Module for Sphingolipid Analysis
+===============================================
 
 Generates publication-quality figures including:
 1. Bar plots with error bars (group comparisons)
@@ -38,18 +38,22 @@ plt.rcParams.update({
     'axes.spines.right': False,
 })
 
-# Color palettes
-CONJUGATION_COLORS = {
-    'unconjugated': '#1f77b4',
-    'glycine': '#2ca02c',
-    'taurine': '#d62728',
-    'sulfated': '#9467bd',
-    'n-acyl': '#8c564b',
+# Color palettes for sphingolipid classes
+SPHINGO_CLASS_COLORS = {
+    'ceramide': '#1f77b4',
+    'dihydroceramide': '#aec7e8',
+    'sphingomyelin': '#2ca02c',
+    'sphingoid_base': '#d62728',
+    'sphingoid_base_phosphate': '#ff9896',
+    'hexosylceramide': '#9467bd',
+    'ceramide_1_phosphate': '#8c564b',
 }
 
-ORIGIN_COLORS = {
-    'primary': '#1f77b4',
-    'secondary': '#ff7f0e',
+CHAIN_LENGTH_COLORS = {
+    'short': '#1f77b4',
+    'medium': '#2ca02c',
+    'long': '#ff7f0e',
+    'very_long': '#d62728',
 }
 
 # Default palette - can be overridden
@@ -62,8 +66,8 @@ def get_group_palette(palette_name: str = "Set2", n_colors: int = 10):
     return sns.color_palette(palette_name, n_colors)
 
 
-class BileAcidVisualizer:
-    """Generate visualizations for bile acid data analysis."""
+class SphingolipidVisualizer:
+    """Generate visualizations for sphingolipid data analysis."""
     
     def __init__(
         self,
@@ -124,7 +128,7 @@ class BileAcidVisualizer:
             floor_val = min_positive / 10 if pd.notna(min_positive) else 0.001
             data[log_col] = np.log10(data[value_col].clip(lower=floor_val))
             plot_col = log_col
-            plot_ylabel = f'logâ‚â‚€({ylabel or value_col})'
+            plot_ylabel = f'log₁₀({ylabel or value_col})'
         
         if plot_type == "bar":
             means = data.groupby(group_col)[plot_col].mean()
@@ -196,14 +200,14 @@ class BileAcidVisualizer:
         self,
         data: pd.DataFrame,
         group_col: str,
-        bile_acid_cols: List[str],
+        sphingolipid_cols: List[str],
         title: Optional[str] = None,
         figsize: Optional[Tuple[float, float]] = None,
         as_percentage: bool = True,
         legend_outside: bool = True,
         ax: Optional[plt.Axes] = None
     ) -> Tuple[plt.Figure, plt.Axes]:
-        """Create stacked bar plot showing bile acid composition."""
+        """Create stacked bar plot showing sphingolipid composition."""
         # Filter out NaN groups
         data = data.copy()
         data = data[data[group_col].notna()]
@@ -217,10 +221,10 @@ class BileAcidVisualizer:
         else:
             fig = ax.figure
         
-        available_cols = [c for c in bile_acid_cols if c in data.columns]
+        available_cols = [c for c in sphingolipid_cols if c in data.columns]
         
         if not available_cols:
-            ax.text(0.5, 0.5, 'No bile acid data available', 
+            ax.text(0.5, 0.5, 'No sphingolipid data available', 
                    transform=ax.transAxes, ha='center', va='center')
             return fig, ax
         
@@ -239,7 +243,7 @@ class BileAcidVisualizer:
         
         ax.set_xlabel('')
         ax.set_ylabel('Percentage (%)' if as_percentage else 'Concentration')
-        ax.set_title(title or 'Bile Acid Composition by Group')
+        ax.set_title(title or 'Sphingolipid Composition by Group')
         ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
         
         if legend_outside:
@@ -300,7 +304,7 @@ class BileAcidVisualizer:
         significance_pairs: Optional[List[Tuple[str, str, str]]] = None
     ) -> Tuple[plt.Figure, plt.Axes]:
         """
-        Create comparison plot for a bile acid ratio.
+        Create comparison plot for a sphingolipid ratio.
         
         Args:
             data: DataFrame with ratio and group columns
@@ -338,7 +342,7 @@ class BileAcidVisualizer:
             floor_val = min_positive / 10 if pd.notna(min_positive) else 0.001
             data[log_col] = np.log10(data[ratio_col].clip(lower=floor_val))
             plot_col = log_col
-            ylabel = f'logâ‚â‚€({ratio_col})'
+            ylabel = f'log₁₀({ratio_col})'
         
         # Plot based on type
         if plot_type == "violin":
@@ -522,7 +526,7 @@ class BileAcidVisualizer:
                 floor_val = min_positive / 10 if pd.notna(min_positive) else 0.001
                 plot_data[log_col] = np.log10(plot_data[col].clip(lower=floor_val))
                 plot_col = log_col
-                ylabel = f'logâ‚â‚€({col})'
+                ylabel = f'log₁₀({col})'
             
             if plot_type == "box":
                 sns.boxplot(data=plot_data, x=group_col, y=plot_col, ax=ax,
@@ -627,7 +631,7 @@ class BileAcidVisualizer:
         """
         Create grouped comparison plot with significance annotations for each value type.
         
-        Shows multiple value columns (e.g., Primary/Secondary) grouped by
+        Shows multiple value columns (e.g., Ceramides/SM) grouped by
         the group column, with significance brackets comparing groups within each type.
         
         Args:
@@ -662,7 +666,7 @@ class BileAcidVisualizer:
                 min_positive = data[col][data[col] > 0].min()
                 floor_val = min_positive / 10 if pd.notna(min_positive) else 0.001
                 data[col] = np.log10(data[col].clip(lower=floor_val))
-            plot_ylabel = f'logâ‚â‚€({ylabel})'
+            plot_ylabel = f'log₁₀({ylabel})'
         
         groups = data[group_col].unique().tolist()
         n_groups = len(groups)
@@ -746,7 +750,7 @@ class BileAcidVisualizer:
             # Build stats text
             test_name = result.main_test.test_type.value
             p_val = result.main_test.pvalue
-            sig_marker = "âœ“" if result.main_test.significant else ""
+            sig_marker = "✓" if result.main_test.significant else ""
             stats_text_parts.append(f"{label}: {test_name} p={p_val:.4f} {sig_marker}")
         
         # Adjust y limit to accommodate annotations
@@ -773,7 +777,7 @@ class BileAcidVisualizer:
         other_threshold: float = 2.0
     ) -> plt.Figure:
         """
-        Create pie charts showing bile acid pool composition for each group.
+        Create pie charts showing sphingolipid pool composition for each group.
         
         Args:
             data: DataFrame with group column and percentage columns
@@ -804,9 +808,9 @@ class BileAcidVisualizer:
             axes = [axes]
         
         # Use a nice color palette
-        all_bas = [col.replace('_pct', '') for col in pct_cols]
-        colors = plt.cm.tab20(np.linspace(0, 1, min(len(all_bas) + 1, 20)))
-        color_map = dict(zip(all_bas + ['Other'], colors))
+        all_species = [col.replace('_pct', '') for col in pct_cols]
+        colors = plt.cm.tab20(np.linspace(0, 1, min(len(all_species) + 1, 20)))
+        color_map = dict(zip(all_species + ['Other'], colors))
         
         for idx, (group, ax) in enumerate(zip(groups, axes)):
             group_data = data[data[group_col] == group][pct_cols].mean()
@@ -827,7 +831,7 @@ class BileAcidVisualizer:
                 plot_data = main_slices
             
             # Get colors for this pie
-            pie_colors = [color_map.get(ba, '#999999') for ba in plot_data.index]
+            pie_colors = [color_map.get(sp, '#999999') for sp in plot_data.index]
             
             # Create pie chart
             wedges, texts, autotexts = ax.pie(
@@ -869,7 +873,7 @@ class BileAcidVisualizer:
                          for label in sorted_labels if label in all_labels or label == 'Other']
         
         fig.legend(handles=legend_patches, loc='center left', bbox_to_anchor=(1.0, 0.5),
-                  fontsize=9, title='Bile Acids')
+                  fontsize=9, title='Sphingolipids')
         
         if title:
             fig.suptitle(title, fontsize=14, fontweight='bold', y=1.02)
@@ -888,7 +892,7 @@ class BileAcidVisualizer:
         show_values: bool = True
     ) -> plt.Figure:
         """
-        Create horizontal bar charts showing bile acid percentages by group.
+        Create horizontal bar charts showing sphingolipid percentages by group.
         
         Args:
             data: DataFrame with group column and percentage columns
@@ -896,7 +900,7 @@ class BileAcidVisualizer:
             pct_cols: List of percentage column names (with _pct suffix)
             title: Overall figure title
             figsize: Figure size (auto-calculated if None)
-            top_n: Maximum number of bile acids to show
+            top_n: Maximum number of sphingolipids to show
             show_values: Whether to show percentage values on bars
             
         Returns:
@@ -916,18 +920,18 @@ class BileAcidVisualizer:
         # Clean column names (remove _pct suffix)
         group_means.columns = [col.replace('_pct', '') for col in group_means.columns]
         
-        # Get top N bile acids by overall mean
+        # Get top N sphingolipids by overall mean
         overall_means = group_means.mean().sort_values(ascending=False)
-        top_bas = overall_means.head(top_n).index.tolist()
+        top_species = overall_means.head(top_n).index.tolist()
         
         # Calculate figure size
         if figsize is None:
-            figsize = (12, max(6, len(top_bas) * 0.4))
+            figsize = (12, max(6, len(top_species) * 0.4))
         
         fig, ax = plt.subplots(figsize=figsize)
         
         # Set up positions
-        y_pos = np.arange(len(top_bas))
+        y_pos = np.arange(len(top_species))
         bar_height = 0.8 / n_groups
         
         # Get colors for groups
@@ -935,7 +939,7 @@ class BileAcidVisualizer:
         
         # Plot bars for each group
         for i, group in enumerate(groups):
-            values = [group_means.loc[group, ba] for ba in top_bas]
+            values = [group_means.loc[group, sp] for sp in top_species]
             offset = (i - n_groups/2 + 0.5) * bar_height
             
             bars = ax.barh(y_pos + offset, values, bar_height * 0.9,
@@ -951,9 +955,9 @@ class BileAcidVisualizer:
         
         # Formatting
         ax.set_yticks(y_pos)
-        ax.set_yticklabels(top_bas)
-        ax.invert_yaxis()  # Top bile acid at top
-        ax.set_xlabel('% of Total Bile Acid Pool')
+        ax.set_yticklabels(top_species)
+        ax.invert_yaxis()  # Top sphingolipid at top
+        ax.set_xlabel('% of Total Sphingolipid Pool')
         ax.set_xlim(0, ax.get_xlim()[1] * 1.15)  # Add space for labels
         
         ax.legend(title='Group', loc='lower right')
@@ -976,8 +980,8 @@ class BileAcidVisualizer:
         top_n: int = 12
     ) -> plt.Figure:
         """
-        Create stacked horizontal bar chart showing bile acid pool composition.
-        Each bar represents a group, segments show bile acid proportions.
+        Create stacked horizontal bar chart showing sphingolipid pool composition.
+        Each bar represents a group, segments show sphingolipid proportions.
         
         Args:
             data: DataFrame with group column and percentage columns
@@ -985,7 +989,7 @@ class BileAcidVisualizer:
             pct_cols: List of percentage column names (with _pct suffix)
             title: Overall figure title
             figsize: Figure size
-            top_n: Maximum number of bile acids to show (rest grouped as "Other")
+            top_n: Maximum number of sphingolipids to show (rest grouped as "Other")
             
         Returns:
             Matplotlib figure
@@ -1002,17 +1006,17 @@ class BileAcidVisualizer:
         group_means = data.groupby(group_col)[pct_cols].mean()
         group_means.columns = [col.replace('_pct', '') for col in group_means.columns]
         
-        # Get top N bile acids by overall mean
+        # Get top N sphingolipids by overall mean
         overall_means = group_means.mean().sort_values(ascending=False)
-        top_bas = overall_means.head(top_n).index.tolist()
+        top_species = overall_means.head(top_n).index.tolist()
         
         # Create "Other" category
-        other_bas = [ba for ba in group_means.columns if ba not in top_bas]
-        if other_bas:
-            group_means['Other'] = group_means[other_bas].sum(axis=1)
-            plot_bas = top_bas + ['Other']
+        other_species = [sp for sp in group_means.columns if sp not in top_species]
+        if other_species:
+            group_means['Other'] = group_means[other_species].sum(axis=1)
+            plot_species = top_species + ['Other']
         else:
-            plot_bas = top_bas
+            plot_species = top_species
         
         # Calculate figure size
         if figsize is None:
@@ -1021,15 +1025,15 @@ class BileAcidVisualizer:
         fig, ax = plt.subplots(figsize=figsize)
         
         # Colors
-        colors = plt.cm.tab20(np.linspace(0, 1, len(plot_bas)))
+        colors = plt.cm.tab20(np.linspace(0, 1, len(plot_species)))
         
         # Plot stacked horizontal bars
         y_pos = np.arange(n_groups)
         left = np.zeros(n_groups)
         
-        for i, ba in enumerate(plot_bas):
-            values = group_means.loc[groups, ba].values
-            bars = ax.barh(y_pos, values, left=left, label=ba, color=colors[i],
+        for i, sp in enumerate(plot_species):
+            values = group_means.loc[groups, sp].values
+            bars = ax.barh(y_pos, values, left=left, label=sp, color=colors[i],
                           edgecolor='white', linewidth=0.5, height=0.6)
             
             # Add labels for segments >= 5%
@@ -1044,11 +1048,11 @@ class BileAcidVisualizer:
         # Formatting
         ax.set_yticks(y_pos)
         ax.set_yticklabels(groups)
-        ax.set_xlabel('% of Total Bile Acid Pool')
+        ax.set_xlabel('% of Total Sphingolipid Pool')
         ax.set_xlim(0, 100)
         
         # Legend outside
-        ax.legend(title='Bile Acids', bbox_to_anchor=(1.02, 1), loc='upper left',
+        ax.legend(title='Sphingolipids', bbox_to_anchor=(1.02, 1), loc='upper left',
                  fontsize=8)
         
         ax.spines['top'].set_visible(False)
@@ -1077,7 +1081,7 @@ class BileAcidVisualizer:
 
 def create_summary_figure(
     data: pd.DataFrame,
-    bile_acid_cols: List[str],
+    sphingolipid_cols: List[str],
     group_col: str,
     totals: pd.DataFrame,
     output_path: Optional[Path] = None
@@ -1087,78 +1091,78 @@ def create_summary_figure(
     
     gs = fig.add_gridspec(3, 3, hspace=0.3, wspace=0.3)
     
-    # 1. Total bile acids by group
+    # 1. Total sphingolipids by group
     ax1 = fig.add_subplot(gs[0, 0])
     combined = pd.concat([data[[group_col]], totals], axis=1)
     if 'total_all' in combined.columns:
         sns.boxplot(data=combined, x=group_col, y='total_all', ax=ax1)
-        ax1.set_title('Total Bile Acids')
-        ax1.set_ylabel('Concentration (nmol/L)')
+        ax1.set_title('Total Sphingolipids')
+        ax1.set_ylabel('Concentration (ng/mL)')
     
-    # 2. Primary vs Secondary
+    # 2. Ceramides vs Sphingomyelins
     ax2 = fig.add_subplot(gs[0, 1])
-    if 'total_primary' in totals.columns and 'total_secondary' in totals.columns:
+    if 'total_ceramides' in totals.columns and 'total_sphingomyelins' in totals.columns:
         plot_data = pd.DataFrame({
-            'Primary': totals['total_primary'],
-            'Secondary': totals['total_secondary'],
+            'Ceramides': totals['total_ceramides'],
+            'Sphingomyelins': totals['total_sphingomyelins'],
             'Group': data[group_col]
         }).melt(id_vars='Group', var_name='Type', value_name='Concentration')
         sns.barplot(data=plot_data, x='Group', y='Concentration', hue='Type', ax=ax2)
-        ax2.set_title('Primary vs Secondary')
+        ax2.set_title('Ceramides vs Sphingomyelins')
         ax2.legend(title='')
     
-    # 3. Conjugated vs Unconjugated
+    # 3. Long vs Very Long Chain
     ax3 = fig.add_subplot(gs[0, 2])
-    if 'total_conjugated' in totals.columns and 'total_unconjugated' in totals.columns:
+    if 'long_chain' in totals.columns and 'very_long_chain' in totals.columns:
         plot_data = pd.DataFrame({
-            'Conjugated': totals['total_conjugated'],
-            'Unconjugated': totals['total_unconjugated'],
+            'Long Chain': totals['long_chain'],
+            'Very Long Chain': totals['very_long_chain'],
             'Group': data[group_col]
         }).melt(id_vars='Group', var_name='Type', value_name='Concentration')
         sns.barplot(data=plot_data, x='Group', y='Concentration', hue='Type', ax=ax3)
-        ax3.set_title('Conjugated vs Unconjugated')
+        ax3.set_title('Long vs Very Long Chain')
         ax3.legend(title='')
     
-    # 4. Glycine vs Taurine
+    # 4. Saturated vs Unsaturated
     ax4 = fig.add_subplot(gs[1, 0])
-    if 'glycine_conjugated' in totals.columns and 'taurine_conjugated' in totals.columns:
+    if 'saturated' in totals.columns and 'unsaturated' in totals.columns:
         plot_data = pd.DataFrame({
-            'Glycine': totals['glycine_conjugated'],
-            'Taurine': totals['taurine_conjugated'],
+            'Saturated': totals['saturated'],
+            'Unsaturated': totals['unsaturated'],
             'Group': data[group_col]
-        }).melt(id_vars='Group', var_name='Conjugation', value_name='Concentration')
-        sns.barplot(data=plot_data, x='Group', y='Concentration', hue='Conjugation', ax=ax4)
-        ax4.set_title('Glycine vs Taurine Conjugation')
+        }).melt(id_vars='Group', var_name='Saturation', value_name='Concentration')
+        sns.barplot(data=plot_data, x='Group', y='Concentration', hue='Saturation', ax=ax4)
+        ax4.set_title('Saturated vs Unsaturated')
         ax4.legend(title='')
     
     # 5. Composition stacked bar
     ax5 = fig.add_subplot(gs[1, 1:])
-    available_cols = [c for c in bile_acid_cols if c in data.columns][:15]
+    available_cols = [c for c in sphingolipid_cols if c in data.columns][:15]
     if available_cols:
         group_means = data.groupby(group_col)[available_cols].mean()
         row_sums = group_means.sum(axis=1)
         pct_data = group_means.div(row_sums, axis=0) * 100
         pct_data.plot(kind='bar', stacked=True, ax=ax5, 
                      colormap='tab20', edgecolor='white', linewidth=0.3)
-        ax5.set_title('Bile Acid Composition (%)')
+        ax5.set_title('Sphingolipid Composition (%)')
         ax5.set_ylabel('Percentage')
         ax5.legend(bbox_to_anchor=(1.02, 1), loc='upper left', fontsize=7)
         ax5.set_xticklabels(ax5.get_xticklabels(), rotation=45, ha='right')
     
-    # 6. Top individual BAs
+    # 6. Top individual sphingolipids
     ax6 = fig.add_subplot(gs[2, :])
-    top_bas = data[available_cols].mean().nlargest(8).index.tolist()
-    if top_bas:
-        plot_data = data[[group_col] + top_bas].melt(
-            id_vars=group_col, var_name='Bile Acid', value_name='Concentration'
+    top_species = data[available_cols].mean().nlargest(8).index.tolist()
+    if top_species:
+        plot_data = data[[group_col] + top_species].melt(
+            id_vars=group_col, var_name='Sphingolipid', value_name='Concentration'
         )
-        sns.boxplot(data=plot_data, x='Bile Acid', y='Concentration', 
+        sns.boxplot(data=plot_data, x='Sphingolipid', y='Concentration', 
                    hue=group_col, ax=ax6)
-        ax6.set_title('Top 8 Most Abundant Bile Acids')
+        ax6.set_title('Top 8 Most Abundant Sphingolipids')
         ax6.set_xticklabels(ax6.get_xticklabels(), rotation=45, ha='right')
         ax6.legend(title='Group')
     
-    plt.suptitle('Bile Acid Analysis Summary', fontsize=14, fontweight='bold', y=1.02)
+    plt.suptitle('Sphingolipid Analysis Summary', fontsize=14, fontweight='bold', y=1.02)
     
     if output_path:
         fig.savefig(output_path, dpi=300, bbox_inches='tight')

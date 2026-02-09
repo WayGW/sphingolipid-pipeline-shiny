@@ -1,5 +1,5 @@
 """
-Bile Acid Analysis Pipeline - Streamlit Application
+Sphingolipid Analysis Pipeline - Streamlit Application
 ====================================================
 
 Run with: streamlit run app.py
@@ -19,11 +19,11 @@ from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config.bile_acid_species import (
-    BILE_ACID_PANEL, get_glycine_conjugated, get_taurine_conjugated,
-    get_primary, get_secondary, get_conjugated, get_unconjugated
+from config.sphingolipid_species import (
+    SPHINGOLIPID_PANEL, get_ceramides, get_dihydroceramides, get_sphingomyelins, 
+    get_sphingoid_bases, get_sphingoid_base_phosphates, get_ceramide_1_phosphates
 )
-from modules.data_processing import BileAcidDataProcessor, ProcessedData, validate_data_quality
+from modules.data_processing import SphingolipidDataProcessor, ProcessedData, validate_data_quality
 from modules.statistical_tests import StatisticalAnalyzer, format_analysis_report
 from modules.visualization import BileAcidVisualizer, create_summary_figure
 from modules.report_generation import (
@@ -32,7 +32,7 @@ from modules.report_generation import (
     get_significant_differences_summary
 )
 
-st.set_page_config(page_title="Bile Acid Analysis Pipeline", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="Sphingolipid Analysis Pipeline", page_icon="🧬", layout="wide")
 
 
 def init_session_state():
@@ -129,7 +129,7 @@ def get_sig_pairs(result, max_pairs=5):
 
 def generate_all_export_figures(processed, results, settings):
     """Generate all figure variations for export package."""
-    from config.bile_acid_species import get_primary, get_secondary, get_glycine_conjugated, get_taurine_conjugated
+    from config.sphingolipid_species import get_ceramides, get_dihydroceramides, get_sphingomyelins, get_sphingoid_bases, get_sphingoid_base_phosphates, get_ceramide_1_phosphates
     
     figures = {}
     viz = BileAcidVisualizer(color_palette=settings['color_palette'], style=settings['plot_style'])

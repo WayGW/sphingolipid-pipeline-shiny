@@ -1,6 +1,6 @@
 """
-Report Generation Module for Bile Acid Analysis
-=================================================
+Report Generation Module for Sphingolipid Analysis
+===================================================
 
 Generates organized Excel workbooks with:
 - Separate sheets for each analysis type
@@ -23,11 +23,13 @@ from scipy import stats
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from config.bile_acid_species import (
-    BILE_ACID_PANEL, ANALYSIS_GROUPS, CLINICAL_RATIOS,
-    get_glycine_conjugated, get_taurine_conjugated,
-    get_primary, get_secondary, get_conjugated, get_unconjugated,
-    get_sulfated
+from config.sphingolipid_species import (
+    SPHINGOLIPID_PANEL, ANALYSIS_GROUPS, CLINICAL_RATIOS,
+    get_ceramides, get_dihydroceramides, get_sphingomyelins,
+    get_sphingoid_bases, get_sphingoid_base_phosphates,
+    get_hexosylceramides, get_ceramide_1_phosphates,
+    get_saturated, get_unsaturated,
+    get_very_long_chain, get_long_chain, get_medium_chain, get_short_chain
 )
 from modules.statistical_tests import StatisticalAnalyzer, FullAnalysisResult
 
@@ -35,10 +37,10 @@ from modules.statistical_tests import StatisticalAnalyzer, FullAnalysisResult
 @dataclass
 class ComprehensiveAnalysisResults:
     """Container for all statistical results."""
-    individual_ba_results: Dict[str, FullAnalysisResult] = field(default_factory=dict)
+    individual_sl_results: Dict[str, FullAnalysisResult] = field(default_factory=dict)
     totals_results: Dict[str, FullAnalysisResult] = field(default_factory=dict)
     ratios_results: Dict[str, FullAnalysisResult] = field(default_factory=dict)
-    percentages_results: Dict[str, FullAnalysisResult] = field(default_factory=dict)  # NEW
+    percentages_results: Dict[str, FullAnalysisResult] = field(default_factory=dict)
     category_results: Dict[str, FullAnalysisResult] = field(default_factory=dict)
 
 
@@ -47,7 +49,7 @@ class AnalysisSheet:
     """Data structure for a single analysis sheet."""
     name: str
     description: str
-    bile_acid_columns: List[str]
+    sphingolipid_columns: List[str]
     raw_data: pd.DataFrame
     group_totals: pd.DataFrame
     group_percentages: pd.DataFrame
@@ -137,45 +139,45 @@ class ExcelReportGenerator:
     Generate organized Excel reports with multiple sheets.
     
     Each sheet contains:
-    1. Raw concentration data for relevant bile acids
+    1. Raw concentration data for relevant sphingolipids
     2. Calculated totals per sample
     3. Group summary statistics
     4. Statistical test results
     """
     
-    # Define analysis categories and their bile acid members
+    # Define analysis categories and their sphingolipid members
     ANALYSIS_CATEGORIES = {
-        'Total_All_BAs': {
-            'description': 'All bile acids in panel',
+        'Total_All_Sphingolipids': {
+            'description': 'All sphingolipids in panel',
             'get_columns': lambda available: available,
         },
-        'Total_Conjugated': {
-            'description': 'All conjugated bile acids (Glycine + Taurine + Sulfated)',
-            'get_columns': lambda available: [c for c in get_conjugated() if c in available],
+        'Total_Ceramides': {
+            'description': 'All ceramide species',
+            'get_columns': lambda available: [c for c in get_ceramides() if c in available],
         },
-        'Total_Unconjugated': {
-            'description': 'All unconjugated (free) bile acids',
-            'get_columns': lambda available: [c for c in get_unconjugated() if c in available],
+        'Total_Dihydroceramides': {
+            'description': 'All dihydroceramide species',
+            'get_columns': lambda available: [c for c in get_dihydroceramides() if c in available],
         },
-        'Glycine_Conjugated': {
-            'description': 'Glycine-conjugated bile acids',
-            'get_columns': lambda available: [c for c in get_glycine_conjugated() if c in available],
+        'Total_Sphingomyelins': {
+            'description': 'All sphingomyelin species',
+            'get_columns': lambda available: [c for c in get_sphingomyelins() if c in available],
         },
-        'Taurine_Conjugated': {
-            'description': 'Taurine-conjugated bile acids',
-            'get_columns': lambda available: [c for c in get_taurine_conjugated() if c in available],
+        'Sphingoid_Bases': {
+            'description': 'Free sphingoid bases (sphingosine, dihydrosphingosine, etc.)',
+            'get_columns': lambda available: [c for c in get_sphingoid_bases() if c in available],
         },
-        'Sulfated': {
-            'description': 'Sulfated bile acids',
-            'get_columns': lambda available: [c for c in get_sulfated() if c in available],
+        'Sphingoid_Base_Phosphates': {
+            'description': 'Phosphorylated sphingoid bases (S1P, etc.)',
+            'get_columns': lambda available: [c for c in get_sphingoid_base_phosphates() if c in available],
         },
-        'Total_Primary': {
-            'description': 'Primary bile acids (synthesized in liver)',
-            'get_columns': lambda available: [c for c in get_primary() if c in available],
+        'Very_Long_Chain': {
+            'description': 'Very long chain sphingolipids (C24+)',
+            'get_columns': lambda available: [c for c in get_very_long_chain() if c in available],
         },
-        'Total_Secondary': {
-            'description': 'Secondary bile acids (bacterial modification)',
-            'get_columns': lambda available: [c for c in get_secondary() if c in available],
+        'Long_Chain': {
+            'description': 'Long chain sphingolipids (C20-C22)',
+            'get_columns': lambda available: [c for c in get_long_chain() if c in available],
         },
     }
     
@@ -184,7 +186,7 @@ class ExcelReportGenerator:
         data: pd.DataFrame,
         group_col: str,
         sample_id_col: Optional[str] = None,
-        bile_acid_cols: Optional[List[str]] = None,
+        sphingolipid_cols: Optional[List[str]] = None,
         totals: Optional[pd.DataFrame] = None,
         ratios: Optional[pd.DataFrame] = None,
         percentages: Optional[pd.DataFrame] = None,
@@ -197,7 +199,7 @@ class ExcelReportGenerator:
             data: DataFrame with sample data
             group_col: Column name for group labels
             sample_id_col: Column name for sample IDs
-            bile_acid_cols: List of bile acid column names
+            sphingolipid_cols: List of sphingolipid column names
             totals: Pre-computed totals DataFrame
             ratios: Pre-computed ratios DataFrame
             percentages: Pre-computed percentages DataFrame
@@ -211,12 +213,12 @@ class ExcelReportGenerator:
         self.ratios = ratios
         self.percentages = percentages
         
-        # Identify bile acid columns
-        if bile_acid_cols:
-            self.ba_cols = [c for c in bile_acid_cols if c in data.columns]
+        # Identify sphingolipid columns
+        if sphingolipid_cols:
+            self.sl_cols = [c for c in sphingolipid_cols if c in data.columns]
         else:
             # Auto-detect from panel
-            self.ba_cols = [c for c in BILE_ACID_PANEL.keys() if c in data.columns]
+            self.sl_cols = [c for c in SPHINGOLIPID_PANEL.keys() if c in data.columns]
         
         self.analyzer = StatisticalAnalyzer(alpha=alpha)
         self.analysis_sheets: Dict[str, AnalysisSheet] = {}
@@ -228,14 +230,14 @@ class ExcelReportGenerator:
         valid_data = self.data[self.data[self.group_col].notna()].copy()
         valid_data = valid_data[valid_data[self.group_col].astype(str).str.lower() != 'nan']
         
-        # 1. Individual bile acids
-        for ba in self.ba_cols:
-            if ba in valid_data.columns:
+        # 1. Individual sphingolipids
+        for sl in self.sl_cols:
+            if sl in valid_data.columns:
                 try:
-                    result = self.analyzer.analyze(valid_data, ba, self.group_col)
-                    self.results.individual_ba_results[ba] = result
+                    result = self.analyzer.analyze(valid_data, sl, self.group_col)
+                    self.results.individual_sl_results[sl] = result
                 except Exception as e:
-                    print(f"Could not analyze {ba}: {e}")
+                    print(f"Could not analyze {sl}: {e}")
         
         # 2. Totals
         if self.totals is not None:
@@ -259,7 +261,7 @@ class ExcelReportGenerator:
                     except Exception as e:
                         print(f"Could not analyze {col}: {e}")
         
-        # 4. Percentages (NEW)
+        # 4. Percentages
         if self.percentages is not None:
             combined = pd.concat([valid_data[[self.group_col]], self.percentages.loc[valid_data.index]], axis=1)
             for col in self.percentages.columns:
@@ -281,30 +283,30 @@ class ExcelReportGenerator:
     def _calculate_sheet_data(
         self,
         category_name: str,
-        ba_columns: List[str],
+        sl_columns: List[str],
         description: str
     ) -> AnalysisSheet:
         """Calculate all data for a single analysis sheet."""
         
-        # Get raw data for these bile acids
+        # Get raw data for these sphingolipids
         id_cols = [self.group_col]
         if self.sample_id_col and self.sample_id_col in self.data.columns:
             id_cols = [self.sample_id_col] + id_cols
         
-        available_ba_cols = [c for c in ba_columns if c in self.data.columns]
-        raw_data = self.data[id_cols + available_ba_cols].copy()
+        available_sl_cols = [c for c in sl_columns if c in self.data.columns]
+        raw_data = self.data[id_cols + available_sl_cols].copy()
         
         # Calculate total for each sample
-        raw_data['Total'] = raw_data[available_ba_cols].sum(axis=1)
+        raw_data['Total'] = raw_data[available_sl_cols].sum(axis=1)
         
-        # Calculate total of ALL bile acids for percentage calculation
-        all_ba_total = self.data[self.ba_cols].sum(axis=1)
-        raw_data['Pct_of_Total_BA'] = (raw_data['Total'] / all_ba_total * 100).round(2)
+        # Calculate total of ALL sphingolipids for percentage calculation
+        all_sl_total = self.data[self.sl_cols].sum(axis=1)
+        raw_data['Pct_of_Total_SL'] = (raw_data['Total'] / all_sl_total * 100).round(2)
         
         # Group summary statistics
         group_totals = raw_data.groupby(self.group_col).agg({
             'Total': ['count', 'mean', 'std', 'sem', 'median', 'min', 'max'],
-            'Pct_of_Total_BA': ['mean', 'std', 'sem']
+            'Pct_of_Total_SL': ['mean', 'std', 'sem']
         }).round(4)
         
         # Flatten column names
@@ -315,13 +317,13 @@ class ExcelReportGenerator:
         group_totals['Total_CI95_lower'] = group_totals['Total_mean'] - 1.96 * group_totals['Total_sem']
         group_totals['Total_CI95_upper'] = group_totals['Total_mean'] + 1.96 * group_totals['Total_sem']
         
-        # Individual BA percentages within this category
+        # Individual sphingolipid percentages within this category
         group_percentages = pd.DataFrame()
-        if len(available_ba_cols) > 1:
-            for ba in available_ba_cols:
-                raw_data[f'{ba}_pct'] = (raw_data[ba] / raw_data['Total'] * 100).round(2)
+        if len(available_sl_cols) > 1:
+            for sl in available_sl_cols:
+                raw_data[f'{sl}_pct'] = (raw_data[sl] / raw_data['Total'] * 100).round(2)
             
-            pct_cols = [f'{ba}_pct' for ba in available_ba_cols]
+            pct_cols = [f'{sl}_pct' for sl in available_sl_cols]
             group_percentages = raw_data.groupby(self.group_col)[pct_cols].mean().round(2)
         
         # Statistical analysis
@@ -335,7 +337,7 @@ class ExcelReportGenerator:
         return AnalysisSheet(
             name=category_name,
             description=description,
-            bile_acid_columns=available_ba_cols,
+            sphingolipid_columns=available_sl_cols,
             raw_data=raw_data,
             group_totals=group_totals,
             group_percentages=group_percentages,
@@ -346,12 +348,12 @@ class ExcelReportGenerator:
         """Generate analysis data for all categories."""
         
         for category_name, category_info in self.ANALYSIS_CATEGORIES.items():
-            ba_cols = category_info['get_columns'](self.ba_cols)
+            sl_cols = category_info['get_columns'](self.sl_cols)
             
-            if ba_cols:  # Only create sheet if we have data
+            if sl_cols:  # Only create sheet if we have data
                 sheet = self._calculate_sheet_data(
                     category_name,
-                    ba_cols,
+                    sl_cols,
                     category_info['description']
                 )
                 self.analysis_sheets[category_name] = sheet
@@ -374,8 +376,8 @@ class ExcelReportGenerator:
         header_df = pd.DataFrame({
             'Analysis': [sheet.name],
             'Description': [sheet.description],
-            'Bile Acids Included': [', '.join(sheet.bile_acid_columns)],
-            'N Bile Acids': [len(sheet.bile_acid_columns)]
+            'Sphingolipids Included': [', '.join(sheet.sphingolipid_columns)],
+            'N Sphingolipids': [len(sheet.sphingolipid_columns)]
         })
         header_df.to_excel(writer, sheet_name=sheet_name, startrow=current_row, index=False)
         current_row += 3
@@ -485,18 +487,18 @@ class ExcelReportGenerator:
         current_row = 0
         
         # Title
-        title_df = pd.DataFrame({'': ['BILE ACID ANALYSIS REPORT']})
+        title_df = pd.DataFrame({'': ['SPHINGOLIPID ANALYSIS REPORT']})
         title_df.to_excel(writer, sheet_name='Overview', startrow=current_row, 
                          index=False, header=False)
         current_row += 2
         
         # Data summary
         summary_data = {
-            'Parameter': ['Total Samples', 'Groups', 'Bile Acids Measured', 'Significance Level'],
+            'Parameter': ['Total Samples', 'Groups', 'Sphingolipids Measured', 'Significance Level'],
             'Value': [
                 len(self.data),
                 ', '.join(self.data[self.group_col].unique().astype(str)),
-                len(self.ba_cols),
+                len(self.sl_cols),
                 f"α = {self.alpha}"
             ]
         }
@@ -786,7 +788,7 @@ class SignificancePlotter:
             # Format
             ax.set_title(category.replace('_', ' '), fontsize=11, fontweight='bold')
             ax.set_xlabel('')
-            ax.set_ylabel('Concentration (nmol/L)', fontsize=9)
+            ax.set_ylabel('Concentration (ng/mL)', fontsize=9)
             ax.tick_params(axis='x', rotation=0)
             ax.spines['top'].set_visible(False)
             ax.spines['right'].set_visible(False)
