@@ -284,13 +284,16 @@ def render_sidebar():
     
     # LOD Settings
     st.sidebar.markdown("### 📊 Detection Limits")
-    default_lod = 0.1  # Default LOD in ng/mL
-    lod_value = st.sidebar.number_input("LOD (ng/mL)", 0.0, 100.0, default_lod, step=0.1,
-                                        help="Limit of Detection - values below this are handled according to the setting below")
+    st.sidebar.caption("LODs are auto-detected per-analyte from standard curves")
     
-    lod_handling = st.sidebar.selectbox("Below LOD handling", ["lod", "half_lod", "zero", "half_min", "drop"],
+    default_lod = 0.1  # Fallback LOD in ng/mL
+    lod_value = st.sidebar.number_input("Fallback LOD (ng/mL)", 0.0, 100.0, default_lod, step=0.1,
+                                        help="Used only when auto-detection fails for an analyte")
+    
+    lod_handling = st.sidebar.selectbox("Below LOD handling", ["half_lod", "lod", "zero", "half_min", "drop"],
                                         format_func=lambda x: {"lod": "LOD value", "half_lod": "LOD/2", 
-                                                               "zero": "Zero", "half_min": "Min/2", "drop": "NaN"}[x])
+                                                               "zero": "Zero", "half_min": "Min/2", "drop": "NaN"}[x],
+                                        help="How to replace below-LOD values (uses per-analyte LOD)")
     
     st.sidebar.markdown("### 📈 Analysis")
     alpha = st.sidebar.slider("Significance (α)", 0.01, 0.10, 0.05, 0.01)
@@ -945,9 +948,24 @@ def main():
         c2.metric("Sphingolipids", quality['n_sphingolipids_detected'])
         c3.metric("Groups", quality.get('n_groups', 'N/A'))
         
-        # Show current LOD handling setting
+        # Show LOD detection info
         lod_display = {"lod": "LOD value", "half_lod": "LOD/2", "zero": "Zero", "half_min": "Min/2", "drop": "NaN"}
-        st.caption(f"📊 LOD handling: **{lod_display[settings['lod_handling']]}** | α = **{settings['alpha']}**")
+        lod_source = processed.structure.lod_source
+        n_lods = len(processed.structure.analyte_lods)
+        
+        if lod_source == "standards":
+            st.caption(f"📊 LODs: **Auto-detected** from standard curves ({n_lods} analytes) | Below LOD → **{lod_display[settings['lod_handling']]}** | α = **{settings['alpha']}**")
+        else:
+            st.caption(f"📊 LODs: **Default** ({settings['lod_value']} ng/mL) | Below LOD → **{lod_display[settings['lod_handling']]}** | α = **{settings['alpha']}**")
+        
+        # Expandable section to view detected LODs
+        with st.expander("🔬 View Per-Analyte LODs"):
+            if processed.structure.analyte_lods:
+                lod_df = pd.DataFrame([
+                    {"Analyte": k, "LOD (ng/mL)": v} 
+                    for k, v in sorted(processed.structure.analyte_lods.items())
+                ])
+                st.dataframe(lod_df, hide_index=True, use_container_width=True)
         
         with st.spinner("Computing statistics..."):
             compute_all_statistics(processed, settings)
@@ -987,7 +1005,11 @@ def main():
         })
         st.dataframe(example_df, hide_index=True, use_container_width=False)
         
-        st.info("💡 The pipeline auto-detects sphingolipid columns and group assignments from your data.")
+        st.info("""💡 **Auto-Detection Features:**
+- Sphingolipid columns are auto-detected from your data
+- Group assignments are inferred automatically  
+- **Per-analyte LODs** are extracted from standard curves in the "LC-MS data" sheet (Std rows)
+""")
 
 
 if __name__ == "__main__":

@@ -5,9 +5,10 @@ Data Processing Module for Sphingolipid Analysis
 Handles:
 1. Loading data from Excel/ODS files
 2. Detecting and parsing data structure
-3. Data cleaning (handling LOD, missing values)
-4. Normalization and calculations
-5. Aggregation by sphingolipid groups
+3. Auto-detecting per-analyte LOD from standard curves
+4. Data cleaning (handling LOD, missing values)
+5. Normalization and calculations
+6. Aggregation by sphingolipid groups
 """
 
 import pandas as pd
@@ -43,6 +44,8 @@ class DataStructureInfo:
     data_start_row: int = 0
     units: str = "ng/mL"
     sheet_used: Optional[str] = None  # Which sheet the data was loaded from
+    analyte_lods: Dict[str, float] = field(default_factory=dict)  # Per-analyte LODs
+    lod_source: str = "default"  # "standards" or "default"
 
 
 @dataclass
@@ -96,12 +99,12 @@ class SphingolipidDataProcessor:
         r'blank',
     ]
     
-    LOD_VALUES = ['-----', 'LOD', 'BLQ', 'ND', 'N/D', '<LOD', '<LOQ', 'BLOQ']
+    LOD_VALUES = ['-----', '----', '---', 'LOD', 'BLQ', 'ND', 'N/D', '<LOD', '<LOQ', 'BLOQ', '']
     
     def __init__(
         self,
-        lod_handling: str = "zero",  # "zero", "half_min", "drop"
-        lod_value: float = 0.1,  # Default LOD value for ratio calculations
+        lod_handling: str = "half_lod",  # "zero", "lod", "half_lod", "half_min", "drop"
+        lod_value: float = 0.1,  # Default/fallback LOD value
         custom_sphingolipids: Optional[Dict] = None
     ):
         """
@@ -110,13 +113,15 @@ class SphingolipidDataProcessor:
         Args:
             lod_handling: How to handle below-LOD values
                 - "zero": Replace with 0
+                - "lod": Replace with the analyte's LOD value
+                - "half_lod": Replace with half the analyte's LOD value
                 - "half_min": Replace with half the minimum detected value
                 - "drop": Keep as NaN
-            lod_value: Limit of detection value (used for ratio calculations)
+            lod_value: Default/fallback LOD value when auto-detection fails
             custom_sphingolipids: Additional sphingolipid definitions to merge with panel
         """
         self.lod_handling = lod_handling
-        self.lod_value = lod_value
+        self.lod_value = lod_value  # Fallback LOD
         
         # Merge custom sphingolipids if provided
         self.sphingolipid_panel = SPHINGOLIPID_PANEL.copy()
@@ -133,6 +138,14 @@ class SphingolipidDataProcessor:
         r'results',
         r'dry[\s_-]*(content|fecal)',
         r'liver',
+    ]
+    
+    # Patterns that indicate the LC-MS raw data sheet with standards
+    LCMS_DATA_PATTERNS = [
+        r'lc[\s_-]*ms[\s_-]*data',
+        r'^data$',
+        r'raw[\s_-]*data',
+        r'standards',
     ]
     
     def load_file(
@@ -178,6 +191,21 @@ class SphingolipidDataProcessor:
         # Return both the dataframe and which sheet was used
         sheet_used = selected_sheet if isinstance(selected_sheet, str) else available_sheets[selected_sheet]
         return df, sheet_used
+    
+    def _find_lcms_data_sheet(self, sheet_names: List[str]) -> Optional[str]:
+        """Find the LC-MS data sheet that contains standard curves."""
+        for pattern in self.LCMS_DATA_PATTERNS:
+            for sheet in sheet_names:
+                if re.search(pattern, sheet, re.IGNORECASE):
+                    return sheet
+        
+        # Often the first sheet is the LC-MS data
+        if sheet_names:
+            first_lower = sheet_names[0].lower()
+            if 'lc' in first_lower or 'data' in first_lower or 'ms' in first_lower:
+                return sheet_names[0]
+        
+        return None
     
     def _find_best_sheet(self, sheet_names: List[str]) -> Union[str, int]:
         """
@@ -242,6 +270,160 @@ class SphingolipidDataProcessor:
         xlsx = pd.ExcelFile(filepath, engine=engine)
         return xlsx.sheet_names
     
+    def _extract_lods_from_standards(
+        self, 
+        filepath: Union[str, Path],
+        sphingolipid_cols: List[str]
+    ) -> Dict[str, float]:
+        """
+        Extract per-analyte LOD from standard curve rows in LC-MS data sheet.
+        
+        Looks for rows with "Std X ng/mL" pattern and determines the lowest
+        successful standard (with a valid numeric reading) for each analyte.
+        
+        Args:
+            filepath: Path to Excel file
+            sphingolipid_cols: List of sphingolipid column names to look for
+            
+        Returns:
+            Dict mapping analyte names to their LOD values (in ng/mL)
+        """
+        analyte_lods = {}
+        
+        try:
+            # Get available sheets
+            sheets = self.get_available_sheets(filepath)
+            
+            # Find LC-MS data sheet
+            lcms_sheet = self._find_lcms_data_sheet(sheets)
+            if lcms_sheet is None:
+                return analyte_lods
+            
+            # Load the LC-MS data sheet
+            filepath = Path(filepath)
+            if filepath.suffix.lower() == '.ods':
+                engine = 'odf'
+            elif filepath.suffix.lower() in ['.xlsx', '.xlsm']:
+                engine = 'openpyxl'
+            elif filepath.suffix.lower() == '.xls':
+                engine = 'xlrd'
+            else:
+                engine = None
+            
+            df = pd.read_excel(filepath, sheet_name=lcms_sheet, header=None, engine=engine)
+            
+            # Find header row (row containing analyte names)
+            header_row = self._find_header_row(df)
+            if header_row < 0:
+                return analyte_lods
+            
+            # Set column names
+            df.columns = df.iloc[header_row].astype(str).str.strip()
+            df = df.iloc[header_row + 1:].reset_index(drop=True)
+            
+            # Find the column containing "Data Filename" or standard identifiers
+            std_col = None
+            for col in df.columns[:5]:  # Check first few columns
+                col_str = str(col).lower()
+                if 'data' in col_str or 'filename' in col_str or 'name' in col_str:
+                    # Check if this column has Std values
+                    if df[col].astype(str).str.contains('Std', case=False, na=False).any():
+                        std_col = col
+                        break
+            
+            if std_col is None:
+                # Try first column
+                first_col = df.columns[0]
+                if df[first_col].astype(str).str.contains('Std', case=False, na=False).any():
+                    std_col = first_col
+            
+            if std_col is None:
+                return analyte_lods
+            
+            # Parse standard rows and extract concentrations
+            # Pattern matches: "Std 1 ng/mL", "Std 3  ng/mL", "Std 10 ng/mL", etc.
+            std_pattern = re.compile(r'Std\s*(\d+(?:\.\d+)?)\s*(?:ng/?mL)?', re.IGNORECASE)
+            
+            std_rows = []  # List of (row_index, concentration)
+            for idx in df.index:
+                val = str(df.loc[idx, std_col])
+                match = std_pattern.search(val)
+                if match:
+                    conc = float(match.group(1))
+                    std_rows.append((idx, conc))
+            
+            if not std_rows:
+                return analyte_lods
+            
+            # Sort by concentration (lowest first)
+            std_rows.sort(key=lambda x: x[1])
+            
+            # For each analyte column, find the lowest concentration with a valid value
+            for col in df.columns:
+                col_str = str(col).strip()
+                
+                # Check if this column is an analyte we care about
+                if col_str not in sphingolipid_cols and not self._is_analyte_column(col_str):
+                    continue
+                
+                # Find lowest successful standard for this analyte
+                for idx, conc in std_rows:
+                    val = df.loc[idx, col]
+                    if self._is_valid_measurement(val):
+                        analyte_lods[col_str] = conc
+                        break
+            
+            return analyte_lods
+            
+        except Exception as e:
+            warnings.warn(f"Could not extract LODs from standards: {e}")
+            return analyte_lods
+    
+    def _is_valid_measurement(self, val) -> bool:
+        """Check if a value is a valid measurement (not blank, not '-----', not NaN)."""
+        if pd.isna(val):
+            return False
+        
+        if isinstance(val, (int, float)):
+            return not np.isnan(val) and val > 0
+        
+        if isinstance(val, str):
+            val_clean = val.strip()
+            if val_clean in self.LOD_VALUES or val_clean.lower() in [v.lower() for v in self.LOD_VALUES]:
+                return False
+            try:
+                num = float(val_clean)
+                return num > 0
+            except ValueError:
+                return False
+        
+        return False
+    
+    def _is_analyte_column(self, col: str) -> bool:
+        """Check if column name looks like an analyte."""
+        if not col or pd.isna(col):
+            return False
+        
+        col_str = str(col).strip()
+        
+        # Check if it's in the sphingolipid panel
+        if col_str in self.sphingolipid_panel:
+            return True
+        
+        # Common patterns for sphingolipid analyte columns
+        analyte_patterns = [
+            r'C\d+.*Cer',     # Ceramides (C16 Cer, C24-0 Cer, etc.)
+            r'C\d+.*SM',      # Sphingomyelins
+            r'C\d+.*DHC',     # Dihydroceramides
+            r'S1P',           # Sphingosine-1-phosphate
+            r'S-d\d+',        # Sphingoid bases
+            r'GLU',           # Glucosylceramide
+            r'3KDHS',         # 3-Ketosphinganine
+            r'C\d+.*CP',      # Ceramide-1-phosphates
+        ]
+        
+        return any(re.search(p, col_str, re.IGNORECASE) for p in analyte_patterns)
+    
     def detect_structure(self, df: pd.DataFrame) -> DataStructureInfo:
         """
         Auto-detect the structure of the data file.
@@ -279,75 +461,159 @@ class SphingolipidDataProcessor:
             col_str = str(col).strip()
             col_lower = col_str.lower()
             
-            # Check for sample ID
-            if any(re.match(p, col_lower, re.I) for p in self.SAMPLE_ID_PATTERNS):
+            # Skip empty columns
+            if not col_str or col_str == 'nan':
+                continue
+            
+            # Check for sample ID patterns
+            if any(re.match(p, col_lower) for p in self.SAMPLE_ID_PATTERNS):
                 info.sample_id_col = col_str
                 continue
             
-            # Check for group column
-            if any(re.match(p, col_lower, re.I) for p in self.GROUP_PATTERNS):
+            # Check for group patterns
+            if any(re.match(p, col_lower) for p in self.GROUP_PATTERNS):
                 info.group_col = col_str
                 continue
             
-            # Check for sphingolipid
+            # Check if it's a known sphingolipid
             if col_str in known_species:
                 info.sphingolipid_cols.append(col_str)
-            elif col_str not in ['nan', '', 'NaN', 'None']:
-                # Check for partial matches (handle slight naming variations)
-                matched = False
-                for sp in known_species:
-                    if col_str.replace('_', '').replace('-', '').lower() == \
-                       sp.replace('_', '').replace('-', '').lower():
-                        info.sphingolipid_cols.append(sp)
-                        matched = True
-                        break
-                
-                if not matched and not pd.isna(col):
-                    info.unrecognized_cols.append(col_str)
+                continue
+            
+            # Check if it looks like a sphingolipid (but not in our panel)
+            if self._looks_like_sphingolipid(col_str):
+                info.sphingolipid_cols.append(col_str)
+                continue
+            
+            # Otherwise it's unrecognized
+            info.unrecognized_cols.append(col_str)
         
-        # If no group col found, check first column for group patterns
-        if info.group_col is None and len(df.columns) > 0:
-            first_col_vals = df.iloc[info.data_start_row:, 0].astype(str)
-            if self._looks_like_group_column(first_col_vals):
-                info.group_col = headers[0] if headers[0] not in ['nan', ''] else 'Type'
+        # Find standard rows
+        info.standard_rows = self._find_standard_rows(df, header_row)
+        info.has_standards = len(info.standard_rows) > 0
         
-        # Find standard/calibration rows
-        for idx in range(info.data_start_row, len(df)):
-            row_val = str(df.iloc[idx, 1] if len(df.columns) > 1 else df.iloc[idx, 0]).lower()
-            if any(re.search(p, row_val, re.I) for p in self.STANDARD_PATTERNS):
-                info.standard_rows.append(idx)
-                info.has_standards = True
+        # If no group column found, try to infer from data
+        if info.group_col is None:
+            info.group_col = self._infer_group_column(df, headers, info)
         
         return info
     
     def _find_header_row(self, df: pd.DataFrame) -> int:
-        """Find the row containing column headers (sphingolipid names)."""
-        known_species = set(self.sphingolipid_panel.keys())
+        """Find the row containing column headers."""
+        known_sphingolipids = set(self.sphingolipid_panel.keys())
         
-        for idx in range(min(10, len(df))):  # Check first 10 rows
-            row_vals = set(str(v).strip() for v in df.iloc[idx].values if pd.notna(v))
-            matches = row_vals & known_species
-            if len(matches) >= 3:  # At least 3 sphingolipid names
-                return idx
+        # Check first 10 rows
+        for i in range(min(10, len(df))):
+            row_values = df.iloc[i].astype(str).tolist()
+            matches = sum(1 for v in row_values if v.strip() in known_sphingolipids)
+            
+            # If we find several sphingolipid names, this is likely the header
+            if matches >= 3:
+                return i
+            
+            # Also check for patterns that look like sphingolipids
+            pattern_matches = sum(1 for v in row_values if self._looks_like_sphingolipid(str(v)))
+            if pattern_matches >= 5:
+                return i
         
-        return 0  # Default to first row
+        # Default to first row
+        return 0
     
-    def _looks_like_group_column(self, values: pd.Series) -> bool:
-        """Check if a column looks like group labels."""
-        # Group columns typically have repeated values and are short strings
-        unique_vals = values.dropna().unique()
-        
-        if len(unique_vals) < 2:
+    def _looks_like_sphingolipid(self, name: str) -> bool:
+        """Check if a name looks like a sphingolipid."""
+        if not name or pd.isna(name):
             return False
-        if len(unique_vals) > len(values) * 0.5:
-            return False  # Too many unique values
         
-        # Check if values look like group names (short alphanumeric)
-        for v in unique_vals[:10]:
-            if len(str(v)) > 50:
-                return False
-            if re.match(r'^[\d.]+$', str(v)):
+        name = str(name).strip()
+        
+        # Common sphingolipid patterns
+        patterns = [
+            r'^C\d+[:\-]?\d*\s*(Cer|SM|DHC|CP)',
+            r'^(S|DHS|Sph)[:\-]?d\d+',
+            r'^S1P',
+            r'^GLU[\-]?C',
+            r'^3KDHS',
+            r'Ceramide',
+            r'Sphingomyelin',
+            r'Sphingosine',
+        ]
+        
+        return any(re.search(p, name, re.IGNORECASE) for p in patterns)
+    
+    def _find_standard_rows(self, df: pd.DataFrame, header_row: int) -> List[int]:
+        """Find rows that appear to be standards/calibrators."""
+        standard_rows = []
+        
+        # Look at rows after header
+        for i in range(header_row + 1, len(df)):
+            row_str = ' '.join(df.iloc[i].astype(str).tolist()[:3]).lower()
+            
+            # Check for standard patterns
+            if any(re.search(p, row_str) for p in self.STANDARD_PATTERNS):
+                standard_rows.append(i)
+        
+        return standard_rows
+    
+    def _infer_group_column(
+        self, 
+        df: pd.DataFrame, 
+        headers: List[str],
+        info: DataStructureInfo
+    ) -> Optional[str]:
+        """Try to infer which column contains group information."""
+        # Look for columns that might be groups but weren't matched by patterns
+        potential_group_cols = []
+        
+        for i, col in enumerate(headers):
+            col_str = str(col).strip()
+            
+            # Skip if already identified or looks like sphingolipid
+            if col_str in info.sphingolipid_cols or col_str == info.sample_id_col:
+                continue
+            
+            # Skip if empty/nan
+            if not col_str or col_str.lower() == 'nan':
+                continue
+            
+            # Get column data (skip header row)
+            start_row = info.data_start_row
+            if start_row < len(df) and i < len(df.columns):
+                col_data = df.iloc[start_row:, i]
+                
+                # Check if it looks like group data
+                if self._looks_like_group_column(col_data):
+                    potential_group_cols.append(col_str)
+        
+        return potential_group_cols[0] if potential_group_cols else None
+    
+    def _looks_like_group_column(self, series: pd.Series) -> bool:
+        """Check if a series looks like it contains group information."""
+        # Drop NaN values
+        non_null = series.dropna().astype(str)
+        if len(non_null) < 2:
+            return False
+        
+        # Get unique values
+        unique_vals = non_null.unique()
+        
+        # Groups typically have few unique values (2-20)
+        if len(unique_vals) < 2 or len(unique_vals) > 20:
+            return False
+        
+        # Groups typically have repeated values
+        if len(unique_vals) == len(non_null):
+            return False  # All unique = probably IDs
+        
+        # Check that values look like group names (not numbers)
+        for val in unique_vals:
+            val_str = str(val).strip().lower()
+            if val_str in ['nan', '', 'none']:
+                continue
+            try:
+                float(val_str)
                 return False  # Pure numbers aren't group names
+            except ValueError:
+                pass
         
         return True
     
@@ -360,7 +626,7 @@ class SphingolipidDataProcessor:
         Clean the raw data:
         - Set proper column names
         - Remove standard rows
-        - Handle LOD values
+        - Handle LOD values (per-analyte)
         - Convert to numeric
         - Remove rows with NaN/empty group values
         """
@@ -376,10 +642,12 @@ class SphingolipidDataProcessor:
         if adjusted_std_rows:
             df = df.drop(index=adjusted_std_rows).reset_index(drop=True)
         
-        # Handle LOD values and convert to numeric
+        # Handle LOD values and convert to numeric (using per-analyte LODs)
         for col in structure.sphingolipid_cols:
             if col in df.columns:
-                df[col] = self._clean_numeric_column(df[col], structure)
+                # Get this analyte's LOD (or use fallback)
+                analyte_lod = structure.analyte_lods.get(col, self.lod_value)
+                df[col] = self._clean_numeric_column(df[col], analyte_lod)
         
         # Remove rows where group column is NaN or empty
         if structure.group_col and structure.group_col in df.columns:
@@ -398,24 +666,24 @@ class SphingolipidDataProcessor:
     def _clean_numeric_column(
         self, 
         series: pd.Series,
-        structure: DataStructureInfo
+        analyte_lod: float
     ) -> pd.Series:
         """
         Clean a single numeric column.
         
-        Handles below-LOD markers (like '-----', 'LOD', 'BLQ') based on lod_handling:
-        - "zero": Replace with 0 (legacy behavior)
-        - "lod": Replace with the LOD value from sample matrix
-        - "half_lod": Replace with half the LOD value
-        - "half_min": Replace with half the minimum detected value
-        - "drop": Keep as NaN (will exclude from calculations)
+        Handles below-LOD markers (like '-----', 'LOD', 'BLQ') based on lod_handling,
+        using the analyte-specific LOD value.
+        
+        Args:
+            series: The column data
+            analyte_lod: The LOD value for this specific analyte
         """
         # Convert series to object type first to avoid downcasting issues
         series = series.astype(object)
         
         # Replace LOD marker values with None (will become NaN after to_numeric)
-        lod_values_all = self.LOD_VALUES + [v.lower() for v in self.LOD_VALUES]
-        mask = series.isin(lod_values_all)
+        lod_values_all = self.LOD_VALUES + [v.lower() for v in self.LOD_VALUES if v]
+        mask = series.astype(str).str.strip().isin(lod_values_all)
         series = series.where(~mask, None)
         
         # Convert to numeric
@@ -425,17 +693,17 @@ class SphingolipidDataProcessor:
         if self.lod_handling == "zero":
             series = series.fillna(0)
         elif self.lod_handling == "lod":
-            # Use the LOD value from sample matrix
-            series = series.fillna(self.lod_value)
+            # Use the analyte-specific LOD value
+            series = series.fillna(analyte_lod)
         elif self.lod_handling == "half_lod":
-            # Use half the LOD value
-            series = series.fillna(self.lod_value / 2)
+            # Use half the analyte-specific LOD value
+            series = series.fillna(analyte_lod / 2)
         elif self.lod_handling == "half_min":
             min_val = series[series > 0].min()
             if pd.notna(min_val):
                 series = series.fillna(min_val / 2)
             else:
-                series = series.fillna(self.lod_value / 2)
+                series = series.fillna(analyte_lod / 2)
         # "drop" leaves NaN
         
         return series
@@ -448,16 +716,14 @@ class SphingolipidDataProcessor:
         """Calculate aggregate totals for sphingolipid groups."""
         totals = pd.DataFrame(index=df.index)
         
-        # Get available columns
-        available_cols = set(df.columns) & set(sphingolipid_cols)
-        
-        for group_name, species_list in ANALYSIS_GROUPS.items():
-            cols_in_group = [c for c in species_list if c in available_cols]
-            if cols_in_group:
-                totals[group_name] = df[cols_in_group].sum(axis=1)
-        
         # Total of all sphingolipids
-        totals['total_all'] = df[list(available_cols)].sum(axis=1)
+        totals['total_all'] = df[sphingolipid_cols].sum(axis=1)
+        
+        # Totals by sphingo class
+        for group_name, group_species in ANALYSIS_GROUPS.items():
+            available = [s for s in group_species if s in sphingolipid_cols]
+            if available:
+                totals[group_name] = df[available].sum(axis=1)
         
         return totals
     
@@ -466,51 +732,50 @@ class SphingolipidDataProcessor:
         df: pd.DataFrame,
         sphingolipid_cols: List[str]
     ) -> pd.DataFrame:
-        """Calculate percentage of total for each sphingolipid."""
-        available_cols = [c for c in sphingolipid_cols if c in df.columns]
+        """Calculate each sphingolipid as percentage of total pool."""
+        percentages = pd.DataFrame(index=df.index)
         
-        total = df[available_cols].sum(axis=1)
+        total = df[sphingolipid_cols].sum(axis=1)
         
-        pct_df = pd.DataFrame(index=df.index)
-        for col in available_cols:
-            pct_df[f"{col}_pct"] = (df[col] / total * 100).replace([np.inf, -np.inf], 0)
+        for col in sphingolipid_cols:
+            # Avoid division by zero
+            pct = df[col] / total.replace(0, np.nan) * 100
+            percentages[f'{col}_pct'] = pct.round(2)
         
-        return pct_df
+        return percentages
     
     def calculate_ratios(
-        self, 
+        self,
         df: pd.DataFrame,
         sphingolipid_cols: List[str],
         lod_value: float = 0.1
     ) -> pd.DataFrame:
-        """
-        Calculate clinical/research ratios.
-        
-        Note: Below-LOD values should already be replaced with LOD value
-        during data cleaning. This function handles any remaining zeros
-        as a safety measure.
-        
-        Args:
-            df: DataFrame with sphingolipid concentrations
-            sphingolipid_cols: List of sphingolipid column names
-            lod_value: Fallback LOD value if denominator is still zero
-        """
+        """Calculate clinical/research ratios."""
         ratios = pd.DataFrame(index=df.index)
-        available_cols = set(df.columns) & set(sphingolipid_cols)
         
-        for ratio_name, ratio_def in CLINICAL_RATIOS.items():
-            num_cols = [c for c in ratio_def['numerator'] if c in available_cols]
-            den_cols = [c for c in ratio_def['denominator'] if c in available_cols]
+        for ratio_name, ratio_info in CLINICAL_RATIOS.items():
+            num_cols = ratio_info['numerator']
+            den_cols = ratio_info['denominator']
             
-            if num_cols and den_cols:
-                numerator = df[num_cols].sum(axis=1)
-                denominator = df[den_cols].sum(axis=1)
+            # Handle both list of column names and function calls
+            if isinstance(num_cols, str):
+                # It's a reference to an analysis group
+                num_cols = ANALYSIS_GROUPS.get(num_cols, [])
+            if isinstance(den_cols, str):
+                den_cols = ANALYSIS_GROUPS.get(den_cols, [])
+            
+            # Get available columns
+            num_available = [c for c in num_cols if c in sphingolipid_cols]
+            den_available = [c for c in den_cols if c in sphingolipid_cols]
+            
+            if num_available and den_available:
+                numerator = df[num_available].sum(axis=1)
+                denominator = df[den_available].sum(axis=1)
                 
-                # Safety: replace any remaining zeros with LOD value
-                denominator_safe = denominator.replace(0, lod_value)
+                # Replace zeros with small value for ratio calculation
+                denominator = denominator.replace(0, lod_value / 2)
                 
-                # Calculate ratio
-                ratios[ratio_name] = numerator / denominator_safe
+                ratios[ratio_name] = numerator / denominator
         
         return ratios
     
@@ -521,9 +786,6 @@ class SphingolipidDataProcessor:
         value_cols: List[str]
     ) -> Dict[str, pd.DataFrame]:
         """Calculate summary statistics for each group."""
-        if group_col not in df.columns:
-            return {}
-        
         summaries = {}
         
         for col in value_cols:
@@ -531,22 +793,11 @@ class SphingolipidDataProcessor:
                 continue
             
             summary = df.groupby(group_col)[col].agg([
-                ('n', 'count'),
-                ('mean', 'mean'),
-                ('std', 'std'),
-                ('sem', 'sem'),
-                ('median', 'median'),
-                ('min', 'min'),
-                ('max', 'max')
+                'count', 'mean', 'std', 'median', 'min', 'max'
             ]).round(4)
             
-            # Add percentage of group total
-            group_totals = df.groupby(group_col)[value_cols].sum()
-            if col in group_totals.columns:
-                summary['pct_of_total'] = (
-                    df.groupby(group_col)[col].sum() / 
-                    group_totals.sum(axis=1) * 100
-                ).round(2)
+            # Add SEM
+            summary['sem'] = df.groupby(group_col)[col].sem().round(4)
             
             summaries[col] = summary
         
@@ -569,6 +820,8 @@ class SphingolipidDataProcessor:
         Returns:
             ProcessedData object with all calculations
         """
+        filepath = Path(filepath)
+        
         # Load raw data (auto-detects best sheet if not specified)
         raw_df, sheet_used = self.load_file(filepath, sheet_name)
         
@@ -582,7 +835,22 @@ class SphingolipidDataProcessor:
         if group_col:
             structure.group_col = group_col
         
-        # Clean data
+        # ================================================================
+        # Extract per-analyte LODs from standard curves in LC-MS data sheet
+        # ================================================================
+        analyte_lods = self._extract_lods_from_standards(filepath, structure.sphingolipid_cols)
+        
+        if analyte_lods:
+            structure.analyte_lods = analyte_lods
+            structure.lod_source = "standards"
+            print(f"✓ Auto-detected LODs for {len(analyte_lods)} analytes from standard curves")
+        else:
+            # Use default LOD for all analytes
+            structure.analyte_lods = {col: self.lod_value for col in structure.sphingolipid_cols}
+            structure.lod_source = "default"
+            print(f"⚠ Using default LOD ({self.lod_value} ng/mL) for all analytes")
+        
+        # Clean data (now uses per-analyte LODs)
         clean_df = self.clean_data(raw_df.copy(), structure)
         
         # Extract sample data (with metadata)
@@ -629,102 +897,56 @@ class SphingolipidDataProcessor:
         include_ratios: bool = True
     ) -> pd.DataFrame:
         """
-        Combine all processed data into a single analysis-ready DataFrame.
+        Get a complete dataframe for analysis.
+        
+        Combines sample data with calculated values.
         """
-        dfs = [processed.sample_data]
+        parts = [processed.sample_data]
         
-        if include_percentages:
-            dfs.append(processed.percentages)
         if include_totals:
-            dfs.append(processed.totals)
+            parts.append(processed.totals)
+        if include_percentages:
+            parts.append(processed.percentages)
         if include_ratios:
-            dfs.append(processed.ratios)
+            parts.append(processed.ratios)
         
-        return pd.concat(dfs, axis=1)
+        return pd.concat(parts, axis=1)
 
 
 def validate_data_quality(processed: ProcessedData) -> Dict[str, Any]:
     """
-    Generate a data quality report.
+    Assess data quality and return summary metrics.
     """
-    report = {
+    quality = {
         'n_samples': len(processed.sample_data),
         'n_sphingolipids_detected': len(processed.structure.sphingolipid_cols),
-        'n_unrecognized_cols': len(processed.structure.unrecognized_cols),
-        'unrecognized_cols': processed.structure.unrecognized_cols,
-        'group_col_detected': processed.structure.group_col,
-        'groups': None,
-        'missing_data': {},
-        'zero_prevalence': {},
+        'n_groups': None,
+        'missing_pct': {},
+        'zero_pct': {},
+        'lod_source': processed.structure.lod_source,
+        'analyte_lods': processed.structure.analyte_lods,
     }
     
     # Group info
     if processed.structure.group_col:
         groups = processed.sample_data[processed.structure.group_col].unique()
-        report['groups'] = list(groups)
-        report['n_groups'] = len(groups)
+        quality['n_groups'] = len(groups)
+        quality['groups'] = list(groups)
     
-    # Missing data per sphingolipid
+    # Missing and zero percentages per sphingolipid
     for col in processed.structure.sphingolipid_cols:
         if col in processed.concentrations.columns:
-            n_missing = processed.concentrations[col].isna().sum()
-            n_zero = (processed.concentrations[col] == 0).sum()
-            report['missing_data'][col] = n_missing
-            report['zero_prevalence'][col] = n_zero / len(processed.concentrations) * 100
+            data = processed.concentrations[col]
+            quality['missing_pct'][col] = (data.isna().sum() / len(data) * 100).round(1)
+            quality['zero_pct'][col] = ((data == 0).sum() / len(data) * 100).round(1)
     
-    return report
+    return quality
 
 
 if __name__ == "__main__":
-    # Demo with sample file
-    import sys
-    
-    if len(sys.argv) > 1:
-        filepath = sys.argv[1]
-    else:
-        print("Usage: python data_processing.py <path_to_file>")
-        print("\nRunning demo with synthetic data...")
-        
-        # Create synthetic demo data
-        np.random.seed(42)
-        demo_data = pd.DataFrame({
-            'Type': ['Control']*5 + ['Treatment']*5,
-            'Sample_ID': [f'S{i}' for i in range(10)],
-            'C16 Cer': np.random.lognormal(4, 1, 10),
-            'C18-0 Cer': np.random.lognormal(3, 1, 10),
-            'C24-0 Cer': np.random.lognormal(5, 1, 10),
-            'C24-1 Cer': np.random.lognormal(4.5, 1, 10),
-            'C16-SM': np.random.lognormal(6, 1, 10),
-            'C18-SM': np.random.lognormal(5.5, 1, 10),
-            'S1P-d18-1': np.random.lognormal(2, 1, 10),
-            'S-d18-1': np.random.lognormal(2.5, 1, 10),
-        })
-        
-        # Save to temp file
-        demo_path = '/tmp/demo_sphingolipid_data.xlsx'
-        demo_data.to_excel(demo_path, index=False)
-        filepath = demo_path
-    
-    # Process file
-    processor = SphingolipidDataProcessor()
-    processed = processor.load_and_process(filepath)
-    
-    # Print report
-    print("\n" + "="*60)
-    print("DATA PROCESSING REPORT")
-    print("="*60)
-    
-    quality = validate_data_quality(processed)
-    print(f"\nSamples: {quality['n_samples']}")
-    print(f"Sphingolipids detected: {quality['n_sphingolipids_detected']}")
-    print(f"Group column: {quality['group_col_detected']}")
-    print(f"Groups: {quality['groups']}")
-    
-    if quality['unrecognized_cols']:
-        print(f"\nUnrecognized columns: {quality['unrecognized_cols']}")
-    
-    print("\n--- TOTALS (first 5 rows) ---")
-    print(processed.totals.head())
-    
-    print("\n--- RATIOS (first 5 rows) ---")
-    print(processed.ratios.head())
+    # Demo/test code
+    print("Sphingolipid Data Processor - Ready")
+    print("Example usage:")
+    print("  processor = SphingolipidDataProcessor(lod_handling='half_lod')")
+    print("  processed = processor.load_and_process('data.xlsx')")
+    print("  print(validate_data_quality(processed))")
