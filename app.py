@@ -1,6 +1,6 @@
 """
 Sphingolipid Analysis Pipeline - Streamlit Application
-====================================================
+=======================================================
 
 Run with: streamlit run app.py
 """
@@ -20,12 +20,13 @@ from datetime import datetime
 sys.path.insert(0, str(Path(__file__).parent))
 
 from config.sphingolipid_species import (
-    SPHINGOLIPID_PANEL, get_ceramides, get_dihydroceramides, get_sphingomyelins, 
-    get_sphingoid_bases, get_sphingoid_base_phosphates, get_ceramide_1_phosphates
+    SPHINGOLIPID_PANEL, get_ceramides, get_dihydroceramides,
+    get_sphingomyelins, get_sphingoid_bases, get_sphingoid_base_phosphates,
+    get_saturated, get_unsaturated, get_very_long_chain, get_long_chain
 )
 from modules.data_processing import SphingolipidDataProcessor, ProcessedData, validate_data_quality
 from modules.statistical_tests import StatisticalAnalyzer, format_analysis_report
-from modules.visualization import BileAcidVisualizer, create_summary_figure
+from modules.visualization import SphingolipidVisualizer, create_summary_figure
 from modules.report_generation import (
     ExcelReportGenerator, SignificancePlotter, 
     ComprehensiveAnalysisResults, format_apa_statistics,
@@ -98,7 +99,7 @@ def compute_all_statistics(processed, settings):
     report_gen = ExcelReportGenerator(
         data=processed.sample_data,
         group_col=group_col,
-        bile_acid_cols=processed.structure.bile_acid_cols,
+        sphingolipid_cols=processed.structure.sphingolipid_cols,
         totals=processed.totals,
         ratios=processed.ratios,
         percentages=processed.percentages,
@@ -129,10 +130,8 @@ def get_sig_pairs(result, max_pairs=5):
 
 def generate_all_export_figures(processed, results, settings):
     """Generate all figure variations for export package."""
-    from config.sphingolipid_species import get_ceramides, get_dihydroceramides, get_sphingomyelins, get_sphingoid_bases, get_sphingoid_base_phosphates, get_ceramide_1_phosphates
-    
     figures = {}
-    viz = BileAcidVisualizer(color_palette=settings['color_palette'], style=settings['plot_style'])
+    viz = SphingolipidVisualizer(color_palette=settings['color_palette'], style=settings['plot_style'])
     group_col = processed.structure.group_col
     
     if not group_col or not results:
@@ -140,21 +139,21 @@ def generate_all_export_figures(processed, results, settings):
     
     data = processed.sample_data[processed.sample_data[group_col].notna()].copy()
     data = data[data[group_col].astype(str).str.lower() != 'nan']
-    available_bas = processed.structure.bile_acid_cols
+    available_sls = processed.structure.sphingolipid_cols
     
     # === CONCENTRATIONS TAB FIGURES ===
     conc_selections = {
         'top10': processed.concentrations.mean().nlargest(10).index.tolist(),
-        'significant': [b for b in available_bas if b in results.individual_ba_results 
-                       and results.individual_ba_results[b].main_test.significant][:10],
-        'primary': [b for b in get_primary() if b in available_bas][:10],
-        'secondary': [b for b in get_secondary() if b in available_bas][:10],
+        'significant': [s for s in available_sls if s in results.individual_sl_results 
+                       and results.individual_sl_results[s].main_test.significant][:10],
+        'ceramides': [s for s in get_ceramides() if s in available_sls][:10],
+        'sphingomyelins': [s for s in get_sphingomyelins() if s in available_sls][:10],
     }
     
     for sel_name, selected in conc_selections.items():
         if not selected:
             continue
-        stats_dict = {b: results.individual_ba_results.get(b) for b in selected if b in results.individual_ba_results}
+        stats_dict = {s: results.individual_sl_results.get(s) for s in selected if s in results.individual_sl_results}
         
         for log_scale in [False, True]:
             suffix = f"_{sel_name}{'_log' if log_scale else ''}"
@@ -171,8 +170,8 @@ def generate_all_export_figures(processed, results, settings):
     totals_combined = pd.concat([data[[group_col]], processed.totals.loc[data.index]], axis=1)
     
     # Key totals
-    key_totals = ['total_all', 'total_primary', 'total_secondary', 'total_conjugated', 
-                  'total_unconjugated', 'glycine_conjugated', 'taurine_conjugated']
+    key_totals = ['total_all', 'total_ceramides', 'total_dihydroceramides', 'total_sphingomyelins', 
+                  'sphingoid_bases', 'sphingoid_base_phosphates', 'very_long_chain', 'long_chain']
     available_totals = [t for t in key_totals if t in totals_combined.columns]
     
     if available_totals:
@@ -285,8 +284,8 @@ def render_sidebar():
     
     # LOD Settings
     st.sidebar.markdown("### 📊 Detection Limits")
-    default_lod = 0.3  # Default LOD in nmol/L
-    lod_value = st.sidebar.number_input("LOD (nmol/L)", 0.0, 100.0, default_lod, step=0.1,
+    default_lod = 0.1  # Default LOD in ng/mL
+    lod_value = st.sidebar.number_input("LOD (ng/mL)", 0.0, 100.0, default_lod, step=0.1,
                                         help="Limit of Detection - values below this are handled according to the setting below")
     
     lod_handling = st.sidebar.selectbox("Below LOD handling", ["lod", "half_lod", "zero", "half_min", "drop"],
@@ -330,9 +329,9 @@ def render_sidebar():
 
 def render_concentrations_tab(processed, settings):
     """Render concentrations tab."""
-    st.markdown("### Individual Bile Acid Concentrations")
+    st.markdown("### Individual Sphingolipid Concentrations")
     
-    viz = BileAcidVisualizer(color_palette=settings['color_palette'], style=settings['plot_style'])
+    viz = SphingolipidVisualizer(color_palette=settings['color_palette'], style=settings['plot_style'])
     group_col = processed.structure.group_col
     results = st.session_state.analysis_results
     
@@ -342,32 +341,32 @@ def render_concentrations_tab(processed, settings):
     
     data = processed.sample_data[processed.sample_data[group_col].notna()].copy()
     data = data[data[group_col].astype(str).str.lower() != 'nan']
-    available_bas = processed.structure.bile_acid_cols
+    available_sls = processed.structure.sphingolipid_cols
     
     col1, col2 = st.columns([1, 2])
     with col1:
-        quick = st.selectbox("Quick select", ["Top 10", "Significant", "Primary", "Secondary", "Custom"])
+        quick = st.selectbox("Quick select", ["Top 10", "Significant", "Ceramides", "Sphingomyelins", "Custom"])
     
     if quick == "Top 10":
         selected = processed.concentrations.mean().nlargest(10).index.tolist()
     elif quick == "Significant":
-        selected = [b for b in available_bas if b in results.individual_ba_results 
-                   and results.individual_ba_results[b].main_test.significant][:10]
+        selected = [s for s in available_sls if s in results.individual_sl_results 
+                   and results.individual_sl_results[s].main_test.significant][:10]
         if not selected:
-            st.info("No significant individual BAs found.")
+            st.info("No significant individual sphingolipids found.")
             selected = processed.concentrations.mean().nlargest(5).index.tolist()
-    elif quick == "Primary":
-        selected = [b for b in get_primary() if b in available_bas][:10]
-    elif quick == "Secondary":
-        selected = [b for b in get_secondary() if b in available_bas][:10]
+    elif quick == "Ceramides":
+        selected = [s for s in get_ceramides() if s in available_sls][:10]
+    elif quick == "Sphingomyelins":
+        selected = [s for s in get_sphingomyelins() if s in available_sls][:10]
     else:
         with col2:
-            selected = st.multiselect("Select BAs", available_bas, available_bas[:5])
+            selected = st.multiselect("Select sphingolipids", available_sls, available_sls[:5])
     
     log_scale = st.checkbox("Log₁₀ scale", key="conc_log")
     
     if selected:
-        stats_dict = {b: results.individual_ba_results.get(b) for b in selected if b in results.individual_ba_results}
+        stats_dict = {s: results.individual_sl_results.get(s) for s in selected if s in results.individual_sl_results}
         
         # Display version
         fig = viz.plot_multi_panel_groups_with_stats(data, selected, group_col, stats_dict, 
@@ -392,7 +391,7 @@ def render_totals_tab(processed, settings):
     """Render totals tab."""
     st.markdown("### Aggregate Totals")
     
-    viz = BileAcidVisualizer(color_palette=settings['color_palette'], style=settings['plot_style'])
+    viz = SphingolipidVisualizer(color_palette=settings['color_palette'], style=settings['plot_style'])
     group_col = processed.structure.group_col
     results = st.session_state.analysis_results
     
@@ -405,8 +404,8 @@ def render_totals_tab(processed, settings):
     log_scale = st.checkbox("Log₁₀ scale", key="totals_log")
     
     # Key totals to show
-    key_totals = ['total_all', 'total_primary', 'total_secondary', 'total_conjugated', 
-                  'total_unconjugated', 'glycine_conjugated', 'taurine_conjugated']
+    key_totals = ['total_all', 'total_ceramides', 'total_dihydroceramides', 'total_sphingomyelins', 
+                  'sphingoid_bases', 'sphingoid_base_phosphates', 'very_long_chain', 'long_chain']
     available = [t for t in key_totals if t in combined.columns]
     
     stats_dict = {t: results.totals_results.get(t) for t in available if t in results.totals_results}
@@ -442,10 +441,10 @@ def render_totals_tab(processed, settings):
 
 def render_percentages_tab(processed, settings):
     """Render percentages tab - comparing % composition across groups."""
-    st.markdown("### Bile Acid Pool Composition (%)")
-    st.caption("Compare the percentage each bile acid contributes to the total pool across groups")
+    st.markdown("### Sphingolipid Pool Composition (%)")
+    st.caption("Compare the percentage each sphingolipid contributes to the total pool across groups")
     
-    viz = BileAcidVisualizer(color_palette=settings['color_palette'], style=settings['plot_style'])
+    viz = SphingolipidVisualizer(color_palette=settings['color_palette'], style=settings['plot_style'])
     group_col = processed.structure.group_col
     results = st.session_state.analysis_results
     
@@ -459,13 +458,13 @@ def render_percentages_tab(processed, settings):
     
     # Get available percentage columns (remove _pct suffix for display)
     pct_cols = [c for c in percentages.columns if c.endswith('_pct')]
-    ba_names = [c.replace('_pct', '') for c in pct_cols]
+    sl_names = [c.replace('_pct', '') for c in pct_cols]
     
     col1, col2 = st.columns([1, 2])
     with col1:
         quick = st.selectbox("Quick select", 
-                            ["Top 10 by mean %", "Significant", "Primary", "Secondary", 
-                             "Glycine conjugated", "Taurine conjugated", "Custom"],
+                            ["Top 10 by mean %", "Significant", "Ceramides", "Dihydroceramides", 
+                             "Sphingomyelins", "Very Long Chain", "Custom"],
                             key="pct_quick")
     
     if quick == "Top 10 by mean %":
@@ -477,25 +476,25 @@ def render_percentages_tab(processed, settings):
         if not selected_pct_cols:
             st.info("No significant percentage differences found. Showing top 10 by mean %.")
             selected_pct_cols = percentages[pct_cols].mean().nlargest(10).index.tolist()
-    elif quick == "Primary":
-        primary_bas = get_primary()
-        selected_pct_cols = [f'{ba}_pct' for ba in primary_bas if f'{ba}_pct' in pct_cols][:10]
-    elif quick == "Secondary":
-        secondary_bas = get_secondary()
-        selected_pct_cols = [f'{ba}_pct' for ba in secondary_bas if f'{ba}_pct' in pct_cols][:10]
-    elif quick == "Glycine conjugated":
-        glycine_bas = get_glycine_conjugated()
-        selected_pct_cols = [f'{ba}_pct' for ba in glycine_bas if f'{ba}_pct' in pct_cols][:10]
-    elif quick == "Taurine conjugated":
-        taurine_bas = get_taurine_conjugated()
-        selected_pct_cols = [f'{ba}_pct' for ba in taurine_bas if f'{ba}_pct' in pct_cols][:10]
+    elif quick == "Ceramides":
+        ceramide_sls = get_ceramides()
+        selected_pct_cols = [f'{sl}_pct' for sl in ceramide_sls if f'{sl}_pct' in pct_cols][:10]
+    elif quick == "Dihydroceramides":
+        dhc_sls = get_dihydroceramides()
+        selected_pct_cols = [f'{sl}_pct' for sl in dhc_sls if f'{sl}_pct' in pct_cols][:10]
+    elif quick == "Sphingomyelins":
+        sm_sls = get_sphingomyelins()
+        selected_pct_cols = [f'{sl}_pct' for sl in sm_sls if f'{sl}_pct' in pct_cols][:10]
+    elif quick == "Very Long Chain":
+        vlc_sls = get_very_long_chain()
+        selected_pct_cols = [f'{sl}_pct' for sl in vlc_sls if f'{sl}_pct' in pct_cols][:10]
     else:
         with col2:
-            selected_bas = st.multiselect("Select bile acids", ba_names, ba_names[:5], key="pct_custom")
-            selected_pct_cols = [f'{ba}_pct' for ba in selected_bas]
+            selected_sls = st.multiselect("Select sphingolipids", sl_names, sl_names[:5], key="pct_custom")
+            selected_pct_cols = [f'{sl}_pct' for sl in selected_sls]
     
     if not selected_pct_cols:
-        st.warning("No bile acids selected.")
+        st.warning("No sphingolipids selected.")
         return
     
     # Show significant findings summary
@@ -535,7 +534,7 @@ def render_percentages_tab(processed, settings):
     # Update y-axis labels to show percentage
     for ax in fig.get_axes():
         if ax.get_visible():
-            ax.set_ylabel('% of Total BA')
+            ax.set_ylabel('% of Total SL')
     
     st.pyplot(fig)
     store_figure(fig, 'percentages')
@@ -546,7 +545,7 @@ def render_percentages_tab(processed, settings):
     # =========================================================================
     st.markdown("---")
     st.markdown("#### Pool Composition - Pie Charts")
-    st.caption("Visual breakdown of bile acid pool for each group (top contributors)")
+    st.caption("Visual breakdown of sphingolipid pool for each group (top contributors)")
     
     # Use top 15 percentage columns for pie charts (show full composition)
     all_pct_cols = percentages[pct_cols].mean().nlargest(15).index.tolist()
@@ -555,7 +554,7 @@ def render_percentages_tab(processed, settings):
     
     fig_pie = viz.plot_composition_pie_charts(
         pie_df, group_col, all_pct_cols,
-        title='Bile Acid Pool Composition by Group',
+        title='Sphingolipid Pool Composition by Group',
         top_n=10, other_threshold=2.0
     )
     st.pyplot(fig_pie)
@@ -567,11 +566,11 @@ def render_percentages_tab(processed, settings):
     # =========================================================================
     st.markdown("---")
     st.markdown("#### Pool Composition - Bar Comparison")
-    st.caption("Side-by-side comparison of bile acid percentages across groups")
+    st.caption("Side-by-side comparison of sphingolipid percentages across groups")
     
     fig_hbar = viz.plot_composition_horizontal_bars(
         pie_df, group_col, all_pct_cols,
-        title='Bile Acid Pool Composition Comparison',
+        title='Sphingolipid Pool Composition Comparison',
         top_n=15, show_values=True
     )
     st.pyplot(fig_hbar)
@@ -583,11 +582,11 @@ def render_percentages_tab(processed, settings):
     # =========================================================================
     st.markdown("---")
     st.markdown("#### Stacked Composition View")
-    st.caption("Full bile acid pool breakdown for each group")
+    st.caption("Full sphingolipid pool breakdown for each group")
     
     fig_stacked = viz.plot_composition_stacked_horizontal(
         pie_df, group_col, all_pct_cols,
-        title='Complete Bile Acid Pool Composition',
+        title='Complete Sphingolipid Pool Composition',
         top_n=12
     )
     st.pyplot(fig_stacked)
@@ -600,14 +599,14 @@ def render_percentages_tab(processed, settings):
     with st.expander("📊 Statistical Summary"):
         rows = []
         for pct_col in selected_pct_cols:
-            ba_name = pct_col.replace('_pct', '')
+            sl_name = pct_col.replace('_pct', '')
             res = results.percentages_results.get(pct_col)
             if res:
                 n_sig = 0
                 if res.posthoc_test and res.posthoc_test.pairwise_results is not None:
                     n_sig = res.posthoc_test.pairwise_results['significant'].sum()
                 rows.append({
-                    'Bile Acid': ba_name,
+                    'Sphingolipid': sl_name,
                     'Test': res.main_test.test_type.value,
                     'P-value': f"{res.main_test.pvalue:.4f}",
                     'Significant': '✓' if res.main_test.significant else '',
@@ -622,11 +621,11 @@ def render_percentages_tab(processed, settings):
     with st.expander("📈 Group Mean Percentages"):
         summary_data = []
         for pct_col in selected_pct_cols:
-            ba_name = pct_col.replace('_pct', '')
+            sl_name = pct_col.replace('_pct', '')
             for group in plot_df[group_col].unique():
                 group_data = plot_df[plot_df[group_col] == group][pct_col]
                 summary_data.append({
-                    'Bile Acid': ba_name,
+                    'Sphingolipid': sl_name,
                     'Group': group,
                     'Mean %': f"{group_data.mean():.2f}",
                     'SD': f"{group_data.std():.2f}",
@@ -637,7 +636,7 @@ def render_percentages_tab(processed, settings):
             summary_df = pd.DataFrame(summary_data)
             # Pivot for easier reading
             pivot_df = summary_df.pivot_table(
-                index='Bile Acid', 
+                index='Sphingolipid', 
                 columns='Group', 
                 values='Mean %',
                 aggfunc='first'
@@ -653,7 +652,7 @@ def render_ratios_tab(processed, settings):
     """Render ratios tab with multi-panel display."""
     st.markdown("### Clinical Ratios")
     
-    viz = BileAcidVisualizer(color_palette=settings['color_palette'], style=settings['plot_style'])
+    viz = SphingolipidVisualizer(color_palette=settings['color_palette'], style=settings['plot_style'])
     group_col = processed.structure.group_col
     results = st.session_state.analysis_results
     
@@ -677,9 +676,18 @@ def render_ratios_tab(processed, settings):
                             ["All ratios", "Significant only", "Key ratios", "Custom"],
                             key="ratio_quick")
     
-    # Define key clinical ratios
-    key_ratios = ['primary_to_secondary', 'glycine_to_taurine', 'conjugated_to_unconjugated',
-                  'CA_to_CDCA', 'TCA_to_GCA', 'GCDCA_to_TCDCA']
+    # Define key clinical ratios for sphingolipids
+    key_ratios = [
+        # Individual species ratios
+        'C16_to_C24_Cer', 'C24_1_to_C24_0_Cer', 
+        # Enzyme activity markers
+        'Cer_to_DHC_C16', 'Cer_to_DHC_C24', 'SM_to_Cer_C16', 'S1P_to_Sph',
+        # Chain length comparisons
+        'very_long_to_long', 'very_long_to_medium', 'long_to_medium', 
+        'long_to_short', 'medium_to_short',
+        # Class comparisons
+        'total_Cer_to_SM', 'total_Cer_to_DHC', 'saturated_to_unsaturated'
+    ]
     
     if quick == "All ratios":
         selected_ratios = available
@@ -784,25 +792,25 @@ def render_statistics_tab(processed, settings):
     results = st.session_state.analysis_results
     
     sig_t = sum(1 for r in results.totals_results.values() if r.main_test.significant)
-    sig_b = sum(1 for r in results.individual_ba_results.values() if r.main_test.significant)
+    sig_s = sum(1 for r in results.individual_sl_results.values() if r.main_test.significant)
     sig_p = sum(1 for r in results.percentages_results.values() if r.main_test.significant)
     sig_r = sum(1 for r in results.ratios_results.values() if r.main_test.significant)
     
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Sig. Totals", f"{sig_t}/{len(results.totals_results)}")
-    c2.metric("Sig. BAs", f"{sig_b}/{len(results.individual_ba_results)}")
+    c2.metric("Sig. SLs", f"{sig_s}/{len(results.individual_sl_results)}")
     c3.metric("Sig. Percentages", f"{sig_p}/{len(results.percentages_results)}")
     c4.metric("Sig. Ratios", f"{sig_r}/{len(results.ratios_results)}")
     
     st.markdown("#### Totals")
     st.dataframe(get_significant_differences_summary(results.totals_results), hide_index=True)
     
-    st.markdown("#### Individual BAs (Significant)")
-    sig_ba = {k: v for k, v in results.individual_ba_results.items() if v.main_test.significant}
-    if sig_ba:
-        st.dataframe(get_significant_differences_summary(sig_ba), hide_index=True)
+    st.markdown("#### Individual Sphingolipids (Significant)")
+    sig_sl = {k: v for k, v in results.individual_sl_results.items() if v.main_test.significant}
+    if sig_sl:
+        st.dataframe(get_significant_differences_summary(sig_sl), hide_index=True)
     else:
-        st.info("No significant individual BA differences.")
+        st.info("No significant individual sphingolipid differences.")
     
     st.markdown("#### Percentages (Significant)")
     sig_pct = {k: v for k, v in results.percentages_results.items() if v.main_test.significant}
@@ -843,7 +851,7 @@ def render_export_tab(processed, settings):
             st.download_button(
                 f"📥 {name} (CSV)", 
                 export_df.to_csv(index=False), 
-                f"bile_acid_{name.lower()}.csv", 
+                f"sphingolipid_{name.lower()}.csv", 
                 "text/csv",
                 key=f"download_{name.lower()}"
             )
@@ -868,7 +876,7 @@ def render_export_tab(processed, settings):
             zip_bytes = create_results_zip(processed, results, combined_figures, report_gen)
         
         st.download_button("📥 Complete Package (ZIP)", zip_bytes, 
-                          f"bile_acid_analysis_{datetime.now():%Y%m%d_%H%M}.zip", 
+                          f"sphingolipid_analysis_{datetime.now():%Y%m%d_%H%M}.zip", 
                           "application/zip",
                           key="download_zip")
         
@@ -880,7 +888,7 @@ def render_export_tab(processed, settings):
         plotter = SignificancePlotter()
         fig = plotter.plot_multi_panel_with_significance(
             processed.sample_data, processed.structure.group_col, report_gen,
-            ['Total_All_BAs', 'Total_Primary', 'Total_Secondary', 'Total_Conjugated'], 2, settings['plot_type'])
+            ['Total_All_Sphingolipids', 'Total_Ceramides', 'Total_Dihydroceramides', 'Total_Sphingomyelins'], 2, settings['plot_type'])
         st.pyplot(fig)
         store_figure(fig, 'summary')
         c1, c2 = st.columns(2)
@@ -894,7 +902,7 @@ def main():
     init_session_state()
     settings = render_sidebar()
     
-    st.markdown("# 🧬 Bile Acid Analysis Pipeline")
+    st.markdown("# 🧬 Sphingolipid Analysis Pipeline")
     uploaded = st.file_uploader("Upload Excel/ODS file", ['xlsx', 'xls', 'ods'])
     
     if uploaded:
@@ -917,7 +925,7 @@ def main():
                     tmp_path = tmp.name
                 
                 try:
-                    processor = BileAcidDataProcessor(lod_handling=settings['lod_handling'], lod_value=settings['lod_value'])
+                    processor = SphingolipidDataProcessor(lod_handling=settings['lod_handling'], lod_value=settings['lod_value'])
                     processed = processor.load_and_process(tmp_path)
                     st.session_state.processed_data = processed
                     if settings_changed:
@@ -934,7 +942,7 @@ def main():
         quality = validate_data_quality(processed)
         c1, c2, c3 = st.columns(3)
         c1.metric("Samples", quality['n_samples'])
-        c2.metric("Bile Acids", quality['n_bile_acids_detected'])
+        c2.metric("Sphingolipids", quality['n_sphingolipids_detected'])
         c3.metric("Groups", quality.get('n_groups', 'N/A'))
         
         # Show current LOD handling setting
@@ -959,9 +967,9 @@ def main():
         
         st.markdown("""
         - **Rows:** Samples
-        - **Columns:** Bile acid species (matching panel names)
+        - **Columns:** Sphingolipid species (matching panel names)
         - **First column(s):** Sample ID, Group/Type
-        - **Values:** Concentrations (typically nmol/L)
+        - **Values:** Concentrations (typically ng/mL)
         - **Below LOD:** Can be "-----", "LOD", "BLQ", "ND", etc.
         """)
         
@@ -969,17 +977,17 @@ def main():
         
         # Create example dataframe
         example_df = pd.DataFrame({
-            'Type': ['HD-1', 'HD-2', 'AC-1'],
-            'Sample_ID': ['81-0210', '81-0211', '60-677'],
-            'TCA': [37.62, 66.66, 45.2],
-            'GCA': [194.1, 287.58, '-----'],
-            'TCDCA': [231.9, 158.46, 189.3],
-            'GCDCA': [3220.44, 1534.02, 2890.1],
+            'Type': ['Aged-1', 'Aged-2', 'Young-1'],
+            'Sample_ID': ['S001', 'S002', 'S003'],
+            'C16 Cer': [125.4, 142.8, 98.6],
+            'C24-0 Cer': [312.5, 287.9, '-----'],
+            'C16-SM': [1520.3, 1380.7, 1245.2],
+            'S-d18-1': [15.2, 18.4, 12.8],
             '...': ['...', '...', '...']
         })
         st.dataframe(example_df, hide_index=True, use_container_width=False)
         
-        st.info("💡 The pipeline auto-detects bile acid columns and group assignments from your data.")
+        st.info("💡 The pipeline auto-detects sphingolipid columns and group assignments from your data.")
 
 
 if __name__ == "__main__":

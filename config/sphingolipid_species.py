@@ -632,10 +632,36 @@ CLINICAL_RATIOS = {
         "denominator": ["S1P-d18-0"]
     },
     
-    # Chain length ratios
-    "very_long_to_long_Cer": {
+    # Chain length ratios - all pairwise comparisons
+    "very_long_to_long": {
         "numerator": get_very_long_chain(),
-        "denominator": get_long_chain() + get_medium_chain()
+        "denominator": get_long_chain(),
+        "notes": "Very long chain (C24+) to long chain (C20-C22) ratio"
+    },
+    "very_long_to_medium": {
+        "numerator": get_very_long_chain(),
+        "denominator": get_medium_chain(),
+        "notes": "Very long chain (C24+) to medium chain (C16-C18) ratio"
+    },
+    "very_long_to_short": {
+        "numerator": get_very_long_chain(),
+        "denominator": get_short_chain(),
+        "notes": "Very long chain (C24+) to short chain (C12-C14) ratio"
+    },
+    "long_to_medium": {
+        "numerator": get_long_chain(),
+        "denominator": get_medium_chain(),
+        "notes": "Long chain (C20-C22) to medium chain (C16-C18) ratio"
+    },
+    "long_to_short": {
+        "numerator": get_long_chain(),
+        "denominator": get_short_chain(),
+        "notes": "Long chain (C20-C22) to short chain (C12-C14) ratio"
+    },
+    "medium_to_short": {
+        "numerator": get_medium_chain(),
+        "denominator": get_short_chain(),
+        "notes": "Medium chain (C16-C18) to short chain (C12-C14) ratio"
     },
     
     # Saturation ratios
