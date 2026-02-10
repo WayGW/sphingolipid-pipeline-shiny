@@ -36,6 +36,161 @@ from modules.report_generation import (
 st.set_page_config(page_title="Sphingolipid Analysis Pipeline", page_icon="🧬", layout="wide")
 
 
+def create_excel_with_lod_highlighting(
+    df: pd.DataFrame, 
+    lod_rows: dict, 
+    sheet_name: str = "Data"
+) -> BytesIO:
+    """
+    Create an Excel file with cells highlighted where LOD values were replaced.
+    
+    Args:
+        df: DataFrame to export
+        lod_rows: Dict mapping column names to list of row indices with LOD replacements
+        sheet_name: Name for the Excel sheet
+        
+    Returns:
+        BytesIO buffer containing the Excel file
+    """
+    buf = BytesIO()
+    
+    with pd.ExcelWriter(buf, engine='openpyxl') as writer:
+        df.to_excel(writer, sheet_name=sheet_name, index=False)
+        
+        # Get the worksheet
+        ws = writer.sheets[sheet_name]
+        
+        # Import openpyxl styles for highlighting
+        from openpyxl.styles import PatternFill, Font, Alignment
+        
+        # Yellow fill for LOD-replaced cells
+        lod_fill = PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid")
+        
+        # Get column positions (1-indexed for openpyxl, +1 because row 1 is header)
+        col_positions = {col: idx + 1 for idx, col in enumerate(df.columns)}
+        
+        # Highlight LOD cells
+        for col_name, row_indices in lod_rows.items():
+            if col_name in col_positions:
+                col_idx = col_positions[col_name]
+                for row_idx in row_indices:
+                    # Excel rows are 1-indexed, and row 1 is the header
+                    excel_row = row_idx + 2  # +1 for 0-indexing, +1 for header
+                    cell = ws.cell(row=excel_row, column=col_idx)
+                    cell.fill = lod_fill
+        
+        # Add a legend in a new sheet
+        legend_ws = writer.book.create_sheet("Legend")
+        legend_ws['A1'] = "Cell Highlighting Legend"
+        legend_ws['A1'].font = Font(bold=True, size=12)
+        legend_ws['A3'] = "Yellow cells"
+        legend_ws['B3'] = "Below LOD - value was replaced based on LOD handling setting"
+        legend_ws['A3'].fill = lod_fill
+        
+        # Auto-adjust column widths for main sheet
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
+    
+    buf.seek(0)
+    return buf
+
+
+def create_full_data_excel_with_highlighting(processed, metadata) -> BytesIO:
+    """
+    Create a comprehensive Excel file with all data sheets and LOD highlighting.
+    """
+    buf = BytesIO()
+    lod_rows = processed.structure.analyte_lod_rows
+    
+    with pd.ExcelWriter(buf, engine='openpyxl') as writer:
+        from openpyxl.styles import PatternFill, Font
+        
+        lod_fill = PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid")
+        
+        # Sheet 1: Concentrations (with highlighting)
+        conc_df = pd.concat([metadata, processed.concentrations], axis=1)
+        conc_df.to_excel(writer, sheet_name="Concentrations", index=False)
+        ws_conc = writer.sheets["Concentrations"]
+        
+        # Get column positions for concentrations
+        conc_col_positions = {col: idx + 1 for idx, col in enumerate(conc_df.columns)}
+        
+        # Highlight LOD cells in concentrations
+        for col_name, row_indices in lod_rows.items():
+            if col_name in conc_col_positions:
+                col_idx = conc_col_positions[col_name]
+                for row_idx in row_indices:
+                    excel_row = row_idx + 2
+                    cell = ws_conc.cell(row=excel_row, column=col_idx)
+                    cell.fill = lod_fill
+        
+        # Sheet 2: Totals
+        totals_df = pd.concat([metadata, processed.totals], axis=1)
+        totals_df.to_excel(writer, sheet_name="Totals", index=False)
+        
+        # Sheet 3: Ratios
+        ratios_df = pd.concat([metadata, processed.ratios], axis=1)
+        ratios_df.to_excel(writer, sheet_name="Ratios", index=False)
+        
+        # Sheet 4: Percentages
+        pct_df = pd.concat([metadata, processed.percentages], axis=1)
+        pct_df.to_excel(writer, sheet_name="Percentages", index=False)
+        
+        # Sheet 5: LOD Summary
+        n_samples = len(processed.sample_data)
+        lod_summary = []
+        for analyte, lod in sorted(processed.structure.analyte_lods.items()):
+            count = processed.structure.analyte_lod_counts.get(analyte, 0)
+            pct = (count / n_samples * 100) if n_samples > 0 else 0
+            lod_summary.append({
+                "Analyte": analyte,
+                "LOD (ng/mL)": lod,
+                "Below LOD Count": count,
+                "% Replaced": round(pct, 1)
+            })
+        lod_summary_df = pd.DataFrame(lod_summary)
+        lod_summary_df.to_excel(writer, sheet_name="LOD Summary", index=False)
+        
+        # Sheet 6: Legend
+        legend_ws = writer.book.create_sheet("Legend")
+        legend_ws['A1'] = "Cell Highlighting Legend"
+        legend_ws['A1'].font = Font(bold=True, size=12)
+        legend_ws['A3'] = "Yellow cells"
+        legend_ws['B3'] = "Below LOD - value was replaced based on LOD handling setting"
+        legend_ws['A3'].fill = lod_fill
+        legend_ws['A5'] = "LOD Source"
+        legend_ws['B5'] = processed.structure.lod_source.capitalize()
+        legend_ws['A6'] = "Total Samples"
+        legend_ws['B6'] = n_samples
+        
+        # Auto-adjust column widths for all sheets
+        for sheet_name in writer.sheets:
+            ws = writer.sheets[sheet_name]
+            for column in ws.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 50)
+                ws.column_dimensions[column_letter].width = adjusted_width
+    
+    buf.seek(0)
+    return buf
+
+
 def init_session_state():
     """Initialize session state variables."""
     defaults = {
@@ -232,20 +387,15 @@ def generate_all_export_figures(processed, results, settings):
     return figures
 
 
-def create_results_zip(processed, results, figures, report_gen):
-    """Create ZIP with all results."""
-    # Get metadata columns
-    id_cols = []
-    if processed.structure.sample_id_col and processed.structure.sample_id_col in processed.sample_data.columns:
-        id_cols.append(processed.structure.sample_id_col)
-    if processed.structure.group_col and processed.structure.group_col in processed.sample_data.columns:
-        id_cols.append(processed.structure.group_col)
-    
-    metadata = processed.sample_data[id_cols] if id_cols else pd.DataFrame(index=processed.sample_data.index)
-    
+def create_results_zip(processed, results, figures, report_gen, metadata):
+    """Create ZIP with all results including LOD-highlighted Excel files."""
     buf = BytesIO()
     with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-        # Data files with metadata
+        # Full data Excel with LOD highlighting (primary data file)
+        full_excel_buf = create_full_data_excel_with_highlighting(processed, metadata)
+        zf.writestr('data/sphingolipid_all_data.xlsx', full_excel_buf.getvalue())
+        
+        # Also include CSVs for compatibility
         for name, df in [('concentrations', processed.concentrations), 
                          ('percentages', processed.percentages),
                          ('totals', processed.totals), 
@@ -255,7 +405,7 @@ def create_results_zip(processed, results, figures, report_gen):
             export_df.to_csv(csv_buf, index=False)
             zf.writestr(f'data/{name}.csv', csv_buf.getvalue())
         
-        # Full data
+        # Full data CSV
         full = pd.concat([processed.sample_data, processed.totals, processed.ratios, processed.percentages], axis=1)
         csv_buf = BytesIO()
         full.to_csv(csv_buf, index=False)
@@ -273,6 +423,40 @@ def create_results_zip(processed, results, figures, report_gen):
             if fig:
                 zf.writestr(f'figures/{name}.png', fig_to_bytes(fig, 'png'))
                 zf.writestr(f'figures/{name}.pdf', fig_to_bytes(fig, 'pdf'))
+        
+        # README
+        readme_content = f"""Sphingolipid Analysis Results
+==============================
+
+Generated: {datetime.now():%Y-%m-%d %H:%M}
+
+Contents:
+---------
+data/
+  - sphingolipid_all_data.xlsx  (⭐ Primary data file with LOD highlighting)
+  - concentrations.csv
+  - totals.csv
+  - ratios.csv
+  - percentages.csv
+  - full_analysis.csv
+
+reports/
+  - statistical_report.xlsx
+
+figures/
+  - Various PNG and PDF figures
+
+LOD Highlighting:
+-----------------
+In sphingolipid_all_data.xlsx, yellow cells indicate values that were
+below the limit of detection (LOD) and were replaced according to the
+selected LOD handling method.
+
+LOD Source: {processed.structure.lod_source}
+Total Samples: {len(processed.sample_data)}
+Total Analytes: {len(processed.structure.sphingolipid_cols)}
+"""
+        zf.writestr('README.txt', readme_content)
     
     buf.seek(0)
     return buf.getvalue()
@@ -286,11 +470,11 @@ def render_sidebar():
     st.sidebar.markdown("### 📊 Detection Limits")
     st.sidebar.caption("LODs are auto-detected per-analyte from standard curves")
     
-    default_lod = 1.0  # Fallback LOD in ng/mL
-    lod_value = st.sidebar.number_input("Fallback LOD (ng/mL)", 0.0, 100.0, default_lod, step=0.5,
+    default_lod = 0.1  # Fallback LOD in ng/mL
+    lod_value = st.sidebar.number_input("Fallback LOD (ng/mL)", 0.0, 100.0, default_lod, step=0.1,
                                         help="Used only when auto-detection fails for an analyte")
     
-    lod_handling = st.sidebar.selectbox("Below LOD handling", ["lod", "half_lod", "zero", "half_min", "drop"],
+    lod_handling = st.sidebar.selectbox("Below LOD handling", ["half_lod", "lod", "zero", "half_min", "drop"],
                                         format_func=lambda x: {"lod": "LOD value", "half_lod": "LOD/2", 
                                                                "zero": "Zero", "half_min": "Min/2", "drop": "NaN"}[x],
                                         help="How to replace below-LOD values (uses per-analyte LOD)")
@@ -844,12 +1028,27 @@ def render_export_tab(processed, settings):
             id_cols.append(processed.structure.group_col)
     
         metadata = processed.sample_data[id_cols] if id_cols else pd.DataFrame(index=processed.sample_data.index)
-    
-        # Export each dataset with metadata
-        for name, df in [("Concentrations", processed.concentrations), 
-                     ("Totals", processed.totals),
-                     ("Ratios", processed.ratios), 
-                     ("Percentages", processed.percentages)]:
+        
+        # Concentrations with LOD highlighting (Excel)
+        conc_df = pd.concat([metadata, processed.concentrations], axis=1)
+        conc_buf = create_excel_with_lod_highlighting(
+            conc_df, 
+            processed.structure.analyte_lod_rows,
+            sheet_name="Concentrations"
+        )
+        st.download_button(
+            "📥 Concentrations (Excel) ⭐", 
+            conc_buf.getvalue(), 
+            "sphingolipid_concentrations.xlsx", 
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="download_concentrations",
+            help="Yellow highlighting shows cells where LOD values were replaced"
+        )
+        
+        # Other exports as CSV (no LOD replacement tracking needed)
+        for name, df in [("Totals", processed.totals),
+                         ("Ratios", processed.ratios), 
+                         ("Percentages", processed.percentages)]:
             export_df = pd.concat([metadata, df], axis=1)
             st.download_button(
                 f"📥 {name} (CSV)", 
@@ -861,6 +1060,18 @@ def render_export_tab(processed, settings):
     
     with col2:
         st.markdown("#### Complete Reports")
+        
+        # Full data Excel with all sheets and highlighting
+        full_excel_buf = create_full_data_excel_with_highlighting(processed, metadata)
+        st.download_button(
+            "📥 All Data (Excel) ⭐", 
+            full_excel_buf.getvalue(),
+            f"sphingolipid_all_data_{datetime.now():%Y%m%d}.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="download_full_excel",
+            help="Multi-sheet Excel with Concentrations, Totals, Ratios, Percentages, LOD Summary, and Legend"
+        )
+        
         if report_gen:
             buf = BytesIO()
             report_gen.save_excel_report(buf)
@@ -876,7 +1087,7 @@ def render_export_tab(processed, settings):
             all_figures = generate_all_export_figures(processed, results, settings)
             # Merge with any existing figures (e.g., from viewing tabs)
             combined_figures = {**st.session_state.figures, **all_figures}
-            zip_bytes = create_results_zip(processed, results, combined_figures, report_gen)
+            zip_bytes = create_results_zip(processed, results, combined_figures, report_gen, metadata)
         
         st.download_button("📥 Complete Package (ZIP)", zip_bytes, 
                           f"sphingolipid_analysis_{datetime.now():%Y%m%d_%H%M}.zip", 
@@ -884,6 +1095,7 @@ def render_export_tab(processed, settings):
                           key="download_zip")
         
         st.caption(f"📊 Package includes {len(combined_figures)} figures covering all analysis options")
+        st.caption("⭐ = Contains yellow cell highlighting for LOD-replaced values")
     
     st.markdown("---")
     st.markdown("#### Summary Figure")
@@ -961,11 +1173,29 @@ def main():
         # Expandable section to view detected LODs
         with st.expander("🔬 View Per-Analyte LODs"):
             if processed.structure.analyte_lods:
-                lod_df = pd.DataFrame([
-                    {"Analyte": k, "LOD (ng/mL)": v} 
-                    for k, v in sorted(processed.structure.analyte_lods.items())
-                ])
+                n_samples = quality['n_samples']
+                lod_counts = processed.structure.analyte_lod_counts
+                
+                lod_data = []
+                for analyte, lod in sorted(processed.structure.analyte_lods.items()):
+                    count = lod_counts.get(analyte, 0)
+                    pct = (count / n_samples * 100) if n_samples > 0 else 0
+                    lod_data.append({
+                        "Analyte": analyte,
+                        "LOD (ng/mL)": lod,
+                        "Below LOD": count,
+                        "% Replaced": f"{pct:.1f}%"
+                    })
+                
+                lod_df = pd.DataFrame(lod_data)
+                
+                # Highlight rows where many samples were replaced
                 st.dataframe(lod_df, hide_index=True, use_container_width=True)
+                
+                # Show warning if any analytes have high replacement rates
+                high_replacement = [d["Analyte"] for d in lod_data if float(d["% Replaced"].rstrip('%')) > 50]
+                if high_replacement:
+                    st.warning(f"⚠️ **High replacement rate (>50%):** {', '.join(high_replacement[:5])}{'...' if len(high_replacement) > 5 else ''}")
         
         with st.spinner("Computing statistics..."):
             compute_all_statistics(processed, settings)

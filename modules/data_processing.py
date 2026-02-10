@@ -45,6 +45,8 @@ class DataStructureInfo:
     units: str = "ng/mL"
     sheet_used: Optional[str] = None  # Which sheet the data was loaded from
     analyte_lods: Dict[str, float] = field(default_factory=dict)  # Per-analyte LODs
+    analyte_lod_counts: Dict[str, int] = field(default_factory=dict)  # Count of below-LOD values per analyte
+    analyte_lod_rows: Dict[str, List[int]] = field(default_factory=dict)  # Row indices with LOD replacements per analyte
     lod_source: str = "default"  # "standards" or "default"
 
 
@@ -104,7 +106,7 @@ class SphingolipidDataProcessor:
     def __init__(
         self,
         lod_handling: str = "half_lod",  # "zero", "lod", "half_lod", "half_min", "drop"
-        lod_value: float = 1.0,  # Default/fallback LOD value
+        lod_value: float = 0.1,  # Default/fallback LOD value
         custom_sphingolipids: Optional[Dict] = None
     ):
         """
@@ -643,13 +645,24 @@ class SphingolipidDataProcessor:
             df = df.drop(index=adjusted_std_rows).reset_index(drop=True)
         
         # Handle LOD values and convert to numeric (using per-analyte LODs)
+        # Also track how many values and which rows were below LOD for each analyte
+        lod_counts = {}
+        lod_rows = {}
         for col in structure.sphingolipid_cols:
             if col in df.columns:
                 # Get this analyte's LOD (or use fallback)
                 analyte_lod = structure.analyte_lods.get(col, self.lod_value)
-                df[col] = self._clean_numeric_column(df[col], analyte_lod)
+                cleaned_series, below_lod_count, below_lod_indices = self._clean_numeric_column_with_count(df[col], analyte_lod)
+                df[col] = cleaned_series
+                lod_counts[col] = below_lod_count
+                lod_rows[col] = below_lod_indices
+        
+        # Store the LOD counts and row indices in the structure
+        structure.analyte_lod_counts = lod_counts
+        structure.analyte_lod_rows = lod_rows
         
         # Remove rows where group column is NaN or empty
+        # BUT we need to track which original rows map to which final rows
         if structure.group_col and structure.group_col in df.columns:
             # Convert to string and check for empty/nan values
             group_series = df[structure.group_col].astype(str).str.strip()
@@ -659,24 +672,34 @@ class SphingolipidDataProcessor:
                 (group_series.str.lower() != 'nan') &
                 (group_series.str.lower() != 'none')
             )
+            
+            # Create mapping from old indices to new indices
+            old_to_new = {}
+            new_idx = 0
+            for old_idx in df.index:
+                if valid_mask.loc[old_idx]:
+                    old_to_new[old_idx] = new_idx
+                    new_idx += 1
+            
+            # Update lod_rows to use new indices
+            for col in lod_rows:
+                lod_rows[col] = [old_to_new[i] for i in lod_rows[col] if i in old_to_new]
+            structure.analyte_lod_rows = lod_rows
+            
             df = df[valid_mask].reset_index(drop=True)
         
         return df
     
-    def _clean_numeric_column(
+    def _clean_numeric_column_with_count(
         self, 
         series: pd.Series,
         analyte_lod: float
-    ) -> pd.Series:
+    ) -> Tuple[pd.Series, int, List[int]]:
         """
-        Clean a single numeric column.
+        Clean a single numeric column and count below-LOD values.
         
-        Handles below-LOD markers (like '-----', 'LOD', 'BLQ') based on lod_handling,
-        using the analyte-specific LOD value.
-        
-        Args:
-            series: The column data
-            analyte_lod: The LOD value for this specific analyte
+        Returns:
+            Tuple of (cleaned series, count of below-LOD values, list of row indices)
         """
         # Convert series to object type first to avoid downcasting issues
         series = series.astype(object)
@@ -684,6 +707,8 @@ class SphingolipidDataProcessor:
         # Replace LOD marker values with None (will become NaN after to_numeric)
         lod_values_all = self.LOD_VALUES + [v.lower() for v in self.LOD_VALUES if v]
         mask = series.astype(str).str.strip().isin(lod_values_all)
+        below_lod_count = mask.sum()  # Count how many were below LOD
+        below_lod_indices = list(series.index[mask])  # Get row indices
         series = series.where(~mask, None)
         
         # Convert to numeric
@@ -706,7 +731,7 @@ class SphingolipidDataProcessor:
                 series = series.fillna(analyte_lod / 2)
         # "drop" leaves NaN
         
-        return series
+        return series, below_lod_count, below_lod_indices
     
     def calculate_totals(
         self, 
@@ -748,7 +773,7 @@ class SphingolipidDataProcessor:
         self,
         df: pd.DataFrame,
         sphingolipid_cols: List[str],
-        lod_value: float = 1.0
+        lod_value: float = 0.1
     ) -> pd.DataFrame:
         """Calculate clinical/research ratios."""
         ratios = pd.DataFrame(index=df.index)
@@ -925,6 +950,7 @@ def validate_data_quality(processed: ProcessedData) -> Dict[str, Any]:
         'zero_pct': {},
         'lod_source': processed.structure.lod_source,
         'analyte_lods': processed.structure.analyte_lods,
+        'analyte_lod_counts': processed.structure.analyte_lod_counts,
     }
     
     # Group info
