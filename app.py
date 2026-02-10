@@ -286,11 +286,11 @@ def render_sidebar():
     st.sidebar.markdown("### 📊 Detection Limits")
     st.sidebar.caption("LODs are auto-detected per-analyte from standard curves")
     
-    default_lod = 0.1  # Fallback LOD in ng/mL
-    lod_value = st.sidebar.number_input("Fallback LOD (ng/mL)", 0.0, 100.0, default_lod, step=0.1,
+    default_lod = 1.0  # Fallback LOD in ng/mL
+    lod_value = st.sidebar.number_input("Fallback LOD (ng/mL)", 0.0, 100.0, default_lod, step=0.5,
                                         help="Used only when auto-detection fails for an analyte")
     
-    lod_handling = st.sidebar.selectbox("Below LOD handling", ["half_lod", "lod", "zero", "half_min", "drop"],
+    lod_handling = st.sidebar.selectbox("Below LOD handling", ["lod", "half_lod", "zero", "half_min", "drop"],
                                         format_func=lambda x: {"lod": "LOD value", "half_lod": "LOD/2", 
                                                                "zero": "Zero", "half_min": "Min/2", "drop": "NaN"}[x],
                                         help="How to replace below-LOD values (uses per-analyte LOD)")

@@ -104,7 +104,7 @@ class SphingolipidDataProcessor:
     def __init__(
         self,
         lod_handling: str = "half_lod",  # "zero", "lod", "half_lod", "half_min", "drop"
-        lod_value: float = 0.1,  # Default/fallback LOD value
+        lod_value: float = 1.0,  # Default/fallback LOD value
         custom_sphingolipids: Optional[Dict] = None
     ):
         """
@@ -748,7 +748,7 @@ class SphingolipidDataProcessor:
         self,
         df: pd.DataFrame,
         sphingolipid_cols: List[str],
-        lod_value: float = 0.1
+        lod_value: float = 1.0
     ) -> pd.DataFrame:
         """Calculate clinical/research ratios."""
         ratios = pd.DataFrame(index=df.index)
