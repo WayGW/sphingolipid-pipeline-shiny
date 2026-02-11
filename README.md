@@ -1,10 +1,10 @@
-# Bile Acid Analysis Pipeline
+# Sphingolipid Analysis Pipeline
 
-A comprehensive, user-friendly pipeline for analyzing LC-MS bile acid data with automated statistical testing and publication-quality visualizations.
+A comprehensive, user-friendly pipeline for analyzing LC-MS sphingolipid data with automated statistical testing and publication-quality visualizations.
 
 ## Features
 
-- **Automatic data structure detection** - Recognizes 44 bile acid species from your LC-MS output
+- **Automatic data structure detection** - Recognizes 31 sphingolipid species from your LC-MS output
 - **Smart statistical analysis** - Automatically tests assumptions (normality, homoscedasticity) and selects appropriate tests
 - **Publication-quality figures** - Box plots, stacked bars, heatmaps, and more
 - **Comprehensive calculations** - Group totals, percentages, clinical ratios
@@ -14,7 +14,7 @@ A comprehensive, user-friendly pipeline for analyzing LC-MS bile acid data with 
 
 ```bash
 # Clone or download the pipeline
-cd bile_acid_pipeline
+cd sphingolipid-analysis-pipeline
 
 # Create virtual environment (recommended)
 python -m venv venv
@@ -47,43 +47,56 @@ Expected input format:
 - **Below LOD**: Can be "-----", "LOD", "BLQ", "ND", etc.
 
 Example:
-| Type | Sample_ID | TCA | GCA | TCDCA | GCDCA | ... |
+| Type | Sample_ID | C16 Cer | C24-0 Cer | C16-SM | S-d18-1 | ... |
 |------|-----------|-----|-----|-------|-------|-----|
-| HD-1 | 81-0210 | 37.62 | 194.1 | 231.9 | 3220.44 | ... |
-| HD-2 | 81-0211 | 66.66 | 287.58 | 158.46 | 1534.02 | ... |
-| AC-1 | 60-677 | 45.2 | ----- | 189.3 | 2890.1 | ... |
+| Aged | 81-0210 | 37.62 | 194.1 | 231.9 | 3220.44 | ... |
+| Aged | 81-0211 | 66.66 | 287.58 | 158.46 | 1534.02 | ... |
+| Young | 60-677 | 45.2 | ----- | 189.3 | 2890.1 | ... |
 
-## Recognized Bile Acid Species
+## Recognized Sphingolipid Species
 
-### Primary Bile Acids
-- CA (Cholic Acid)
-- CDCA (Chenodeoxycholic Acid)
-- Conjugated forms: TCA, GCA, TCDCA, GCDCA
+### Shingoid Bases (Free bases)
+- S-d18-1 (Shingosine)
+- S-d18-0 (Dihydrosphingosine (Sphinganine))
+- 3KDHS (3-Keto-dihydrosphingosine)
 
-### Secondary Bile Acids
-- DCA (Deoxycholic Acid)
-- LCA (Lithocholic Acid)
-- UDCA (Ursodeoxycholic Acid)
-- And many more...
+### Sphingoid Base Phosphates
+- S1P-d18-1 (Sphingosine-1-Phosphate (d18:1))
+- S1P-d18-0 (Sphinganine-1-Phosphate (d18:0))
 
-### Sulfated Bile Acids
-- CA-3-S, CA-7-S, CDCA-3-S, DCA-3-S, LCA-3-S, UDCA-3-S
+### Ceramides (Cer)
+- C12 Cer (N-lauroyl-D-erythro-sphingosine)
+- C14 Cer (N-myristoyl-D-erythro-sphingosine)
+- C16 Cer (N-palmitoyl-D-erythro-sphingosine)
+- C18-0 Cer (N-stearoyl-D-erythro-sphingosine)
+- And many more....
 
-See `config/bile_acid_species.py` for the complete panel definition.
+### Ceramide-1-Phosphates
+- C16-CP, C18-CP, C24-CP
+
+### Dihydroceramides (DHC)
+- C16-DHC, C18DHC, C18-1DHC, C24DHC, C24-1DHC
+
+###Sphingomyelins
+- C16-SM, C17-SM, C18-SM, ....
+
+See `config/sphingolipid_species.py` for the complete panel definition.
 
 ## Adding New Bile Acids
 
-Edit `config/bile_acid_species.py`:
+Edit `config/sphingolipid_species.py`:
 
 ```python
-BILE_ACID_PANEL["NEW_BA"] = BileAcidSpecies(
-    abbreviation="NEW_BA",
-    full_name="New Bile Acid",
-    conjugation=Conjugation.UNCONJUGATED,
-    origin=Origin.SECONDARY,
-    core_structure=CoreStructure.OTHER,
-    notes="Custom bile acid"
-)
+SPHINGOLIPID_PANEL["NEW_S"] = SphingolipidSpecies(
+        abbreviation="New S",
+        full_name="New Sphingolipid",
+        sphingo_class=SphingoClass.SPHINGOID_BASE,
+        sphingo_base=SphingoBase.D18_1,
+        chain_length=ChainLength.NA,
+        saturation=Saturation.NA,
+        molecular_weight=299.49,
+        notes="Primary sphingoid base, unsaturated",
+    )
 ```
 
 ## Statistical Tests
@@ -104,32 +117,32 @@ Post-hoc tests (for >2 groups):
 ## Calculated Metrics
 
 ### Group Totals
-- `total_all`: Sum of all bile acids
-- `total_primary`: Sum of primary BAs
-- `total_secondary`: Sum of secondary BAs
-- `total_conjugated`: Sum of all conjugated BAs
-- `total_unconjugated`: Sum of unconjugated BAs
-- `glycine_conjugated`: Sum of glycine-conjugated BAs
-- `taurine_conjugated`: Sum of taurine-conjugated BAs
+- `total_all`: Sum of all sphingolipids
+- `total_ceramide`: Sum of ceramides
+- `total_dihydroceramide`: Sum of dihydroceramides
+- `total_sphingomyelin`: Sum of all sphingomyelins
+- `total_sphingoid_base`: Sum of sphingoid bases
+- `total_sphingoid_base_phosphate`: Sum of sphingoid base phosphates
+- `total_ceramide_1_phosphate`: Sum of ceramide 1 phosphates
 
 ### Clinical Ratios
-- `primary_to_secondary`
-- `glycine_to_taurine`
-- `conjugated_to_unconjugated`
-- `TCA_to_GCA`, `GCA_to_TCA`
-- `GCDCA_to_TCDCA`, `TCDCA_to_GCDCA`
+- chain length comparisons
+- total ceramides vs total sphingomyelin
+- total ceramides vs total dihydroceramides
+- saturated vs unsaturated
+- Individual sphingolpiid species ratios comparisons
 - And more...
 
 ## Project Structure
 
 ```
-bile_acid_pipeline/
+sphingolipid_pipeline/
 ├── app.py                  # Streamlit web application
 ├── requirements.txt        # Python dependencies
 ├── README.md              # This file
 ├── config/
 │   ├── __init__.py
-│   └── bile_acid_species.py  # BA definitions (EDIT THIS FOR NEW BAs)
+│   └── sphingolioid_species.py  # Sphingolipid definitions (EDIT THIS FOR NEW BAs)
 └── modules/
     ├── __init__.py
     ├── data_processing.py    # Data loading and calculations
