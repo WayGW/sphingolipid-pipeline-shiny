@@ -1211,8 +1211,29 @@ def main():
     else:
         # Show expected input format when no data is loaded
         st.markdown("---")
-        st.markdown("### 📋 Expected Input Format")
+        st.markdown("## 📋 Expected Input Format")
         
+        st.markdown("### LC-MS sheet")
+        st.markdown("""
+        - **Rows:** First few are Std curves, followed by samples
+        - **Columns:** "Data Filename" (Std curve and sample names), followed by sphingolipid species
+        """)
+
+
+        st.markdown("**Example:**")
+        
+        # Create example dataframe
+        example_lcms_df = pd.DataFrame({
+            'Data Filename': ['Std 1 ngmL', 'Std 3  ngmL', 'Std 10 ngmL'],
+            'C16 Cer': [1.3, 3.0, 9.9],
+            'C24-0 Cer': [1.1, 2.9, 10.1],
+            'C16-SM': ['----', 3.1, 10.0],
+            'S-d18-1': ['----', '----', 10.2],
+            '...': ['...', '...', '...']
+        })
+        st.dataframe(example_lcms_df, hide_index=True, use_container_width=False)
+
+        st.markdown("### Sample sheet")
         st.markdown("""
         - **Rows:** Samples
         - **Columns:** Sphingolipid species (matching panel names)
