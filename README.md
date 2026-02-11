@@ -39,9 +39,13 @@ Then open http://localhost:8501 in your browser.
 
 ## Data Format
 
-Expected input format:
+Expected LC-MS sheet input format:
+- **Rows**: First few are Std curves then samples
+- **Columns**: "Data Filename" (Std curve and sample names), followed by sphingolipid species
+
+Expected Sample Sheet input format:
 - **Rows**: Samples
-- **Columns**: Bile acid species (matching panel names)
+- **Columns**: Sphingolipid species (matching panel names)
 - **First column(s)**: Sample ID, Group/Type
 - **Values**: Concentrations (typically nmol/L)
 - **Below LOD**: Can be "-----", "LOD", "BLQ", "ND", etc.
