@@ -136,7 +136,7 @@ Post-hoc tests (for >2 groups):
 ## Project Structure
 
 ```
-sphingolipid_pipeline/
+sphingolipid-analysis-pipeline/
 ├── app.py                  # Streamlit web application
 ├── requirements.txt        # Python dependencies
 ├── README.md              # This file
