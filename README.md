@@ -27,7 +27,7 @@ pip install -r requirements.txt
 ## Usage
 
 ### Web Application
-https://bile-acid-pipeline.streamlit.app/
+[https://sphingolipid-pipeline.streamlit.app/](https://sphingolipid-analysis-pipeline-ej8tup4wgi3arlzba7uhmb.streamlit.app/)
 
 ### For Local Hosting
 ```bash
