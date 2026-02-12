@@ -558,7 +558,7 @@ def render_concentrations_tab(processed, settings):
         # Display version
         fig = viz.plot_multi_panel_groups_with_stats(data, selected, group_col, stats_dict, 
                                                      ncols=3, plot_type=settings['plot_type'], log_scale=log_scale,
-                                                     show_points=settings['show_points'])
+                                                     show_points=settings['show_points'], ylabel='Concentration (ng/mL)')
         st.pyplot(fig)
         store_figure(fig, f'concentrations{"_log" if log_scale else ""}')
         plt.close(fig)
@@ -566,7 +566,7 @@ def render_concentrations_tab(processed, settings):
         # Generate other version for export
         fig_other = viz.plot_multi_panel_groups_with_stats(data, selected, group_col, stats_dict,
                                                            ncols=3, plot_type=settings['plot_type'], log_scale=not log_scale,
-                                                           show_points=settings['show_points'])
+                                                           show_points=settings['show_points'], ylabel='Concentration (ng/mL)')
         store_figure(fig_other, f'concentrations{"_log" if not log_scale else ""}')
         plt.close(fig_other)
         
@@ -600,7 +600,7 @@ def render_totals_tab(processed, settings):
     # Display version
     fig = viz.plot_multi_panel_groups_with_stats(combined, available, group_col, stats_dict,
                                                  ncols=3, plot_type=settings['plot_type'], log_scale=log_scale,
-                                                 show_points=settings['show_points'])
+                                                 show_points=settings['show_points'], ylabel='Concentration (ng/mL)')
     st.pyplot(fig)
     store_figure(fig, f'totals{"_log" if log_scale else ""}')
     plt.close(fig)
@@ -608,7 +608,7 @@ def render_totals_tab(processed, settings):
     # Generate other version for export
     fig_other = viz.plot_multi_panel_groups_with_stats(combined, available, group_col, stats_dict,
                                                        ncols=3, plot_type=settings['plot_type'], log_scale=not log_scale,
-                                                       show_points=settings['show_points'])
+                                                       show_points=settings['show_points'], ylabel='Concentration (ng/mL)')
     store_figure(fig_other, f'totals{"_log" if not log_scale else ""}')
     plt.close(fig_other)
     
@@ -715,13 +715,8 @@ def render_percentages_tab(processed, settings):
     fig = viz.plot_multi_panel_groups_with_stats(
         plot_df_display, display_names, group_col, stats_dict,
         ncols=3, plot_type=settings['plot_type'], log_scale=False,
-        show_points=settings['show_points']
+        show_points=settings['show_points'], ylabel='% of Total SL'
     )
-    
-    # Update y-axis labels to show percentage
-    for ax in fig.get_axes():
-        if ax.get_visible():
-            ax.set_ylabel('% of Total SL')
     
     st.pyplot(fig)
     store_figure(fig, 'percentages')
@@ -913,7 +908,7 @@ def render_ratios_tab(processed, settings):
     fig = viz.plot_multi_panel_groups_with_stats(
         combined, selected_ratios, group_col, stats_dict,
         ncols=3, plot_type=settings['plot_type'], log_scale=log_scale,
-        show_points=settings['show_points']
+        show_points=settings['show_points'], ylabel='Ratio'
     )
     st.pyplot(fig)
     store_figure(fig, f'ratios{"_log" if log_scale else ""}')
@@ -923,7 +918,7 @@ def render_ratios_tab(processed, settings):
     fig_other = viz.plot_multi_panel_groups_with_stats(
         combined, selected_ratios, group_col, stats_dict,
         ncols=3, plot_type=settings['plot_type'], log_scale=not log_scale,
-        show_points=settings['show_points']
+        show_points=settings['show_points'], ylabel='Ratio'
     )
     store_figure(fig_other, f'ratios{"_log" if not log_scale else ""}')
     plt.close(fig_other)

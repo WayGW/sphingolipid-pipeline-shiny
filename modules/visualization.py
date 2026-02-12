@@ -471,7 +471,8 @@ class SphingolipidVisualizer:
         sharey: bool = False,
         max_sig_bars: int = 3,
         log_scale: bool = False,
-        show_points: bool = True
+        show_points: bool = True,
+        ylabel: str = "Concentration"
     ) -> plt.Figure:
         """
         Create multi-panel figure with significance annotations.
@@ -488,6 +489,7 @@ class SphingolipidVisualizer:
             max_sig_bars: Maximum significance bars to show per panel
             log_scale: Whether to log10 transform the data for plotting
             show_points: Whether to overlay individual data points
+            ylabel: Label for y-axis (e.g., 'Concentration', 'Ratio', '% of Total')
         """
         # Filter out NaN groups
         data = data.copy()
@@ -575,11 +577,10 @@ class SphingolipidVisualizer:
                 ax.set_title(col, fontsize=10)
             
             ax.set_xlabel('')
-            ax.set_ylabel(ylabel)
-            if i % ncols == 0:
-                ax.set_ylabel('Concentration')
+            if log_scale:
+                ax.set_ylabel(f'log₁₀({ylabel})')
             else:
-                ax.set_ylabel('')
+                ax.set_ylabel(ylabel)
             ax.tick_params(axis='x', rotation=45)
         
         for i in range(n_plots, len(axes)):
