@@ -1688,7 +1688,7 @@ def main():
         
         # Create example dataframe
         example_df = pd.DataFrame({
-            'Type': ['Aged-1', 'Aged-2', 'Young-1'],
+            'Type': ['Aged', 'Aged', 'Young'],
             'Sample_ID': ['S001', 'S002', 'S003'],
             'C16 Cer': [125.4, 142.8, 98.6],
             'C24-0 Cer': [312.5, 287.9, '-----'],
