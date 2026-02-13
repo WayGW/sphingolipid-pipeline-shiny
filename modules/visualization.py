@@ -14,6 +14,7 @@ Generates publication-quality figures including:
 
 import pandas as pd
 import numpy as np
+import math
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.colors import LinearSegmentedColormap
@@ -1222,6 +1223,24 @@ class SphingolipidVisualizer:
         
         for _, row in sig_rows.iterrows():
             p = row.get('pvalue_adj', row.get('pvalue', 1.0))
+            
+            g1, g2 = str(row['group1']), str(row['group2'])
+            within_level = str(row.get('within_level', 'all'))
+            factor_compared = row.get('factor_compared', '')
+            
+            # For main effect marginal comparisons, use the ANOVA main effect
+            # p-value rather than the post-hoc test p-value, since the omnibus
+            # F-test is the definitive result for the main effect.
+            if twoway_result.posthoc_type == "main_effect_marginal":
+                if factor_compared == twoway_result.factor_a_name:
+                    anova_p = twoway_result.factor_a_pvalue
+                    if anova_p is not None and not (isinstance(anova_p, float) and math.isnan(anova_p)):
+                        p = anova_p
+                elif factor_compared == twoway_result.factor_b_name:
+                    anova_p = twoway_result.factor_b_pvalue
+                    if anova_p is not None and not (isinstance(anova_p, float) and math.isnan(anova_p)):
+                        p = anova_p
+            
             if p < 0.001:
                 annot = '***'
             elif p < 0.01:
@@ -1230,10 +1249,6 @@ class SphingolipidVisualizer:
                 annot = '*'
             else:
                 continue
-            
-            g1, g2 = str(row['group1']), str(row['group2'])
-            within_level = str(row.get('within_level', 'all'))
-            factor_compared = row.get('factor_compared', '')
             
             # Determine x positions for the bracket
             try:
