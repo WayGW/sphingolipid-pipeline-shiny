@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Report Generation Module for Sphingolipid Analysis
 ===================================================
@@ -31,7 +32,10 @@ from config.sphingolipid_species import (
     get_saturated, get_unsaturated,
     get_very_long_chain, get_long_chain, get_medium_chain, get_short_chain
 )
-from modules.statistical_tests import StatisticalAnalyzer, FullAnalysisResult
+from modules.statistical_tests import (
+    StatisticalAnalyzer, FullAnalysisResult,
+    TwoWayResult, FullTwoWayAnalysisResult, format_twoway_apa
+)
 
 
 @dataclass
@@ -42,6 +46,17 @@ class ComprehensiveAnalysisResults:
     ratios_results: Dict[str, FullAnalysisResult] = field(default_factory=dict)
     percentages_results: Dict[str, FullAnalysisResult] = field(default_factory=dict)
     category_results: Dict[str, FullAnalysisResult] = field(default_factory=dict)
+    
+    # Two-way ANOVA results (populated when n_factors == 2)
+    is_twoway: bool = False
+    twoway_individual_sl: Dict[str, FullTwoWayAnalysisResult] = field(default_factory=dict)
+    twoway_totals: Dict[str, FullTwoWayAnalysisResult] = field(default_factory=dict)
+    twoway_ratios: Dict[str, FullTwoWayAnalysisResult] = field(default_factory=dict)
+    twoway_percentages: Dict[str, FullTwoWayAnalysisResult] = field(default_factory=dict)
+    factor_a_name: str = ""
+    factor_b_name: str = ""
+    factor_a_col: str = ""
+    factor_b_col: str = ""
 
 
 @dataclass
@@ -124,11 +139,50 @@ def get_significant_differences_summary(results: Dict[str, FullAnalysisResult]) 
             'Test': result.main_test.test_type.value,
             'Statistic': f"{result.main_test.statistic:.3f}",
             'P-value': f"{result.main_test.pvalue:.4f}",
-            'Significant': '✓' if result.main_test.significant else '',
+            'Significant': '✔' if result.main_test.significant else '',
             'Effect Size': f"{result.main_test.effect_size:.3f}" if result.main_test.effect_size else 'N/A',
             'Interpretation': result.main_test.effect_size_interpretation or '',
             'Sig. Pairs': n_sig_pairs,
             'Pairwise': sig_pairs_str
+        })
+    
+    return pd.DataFrame(rows)
+
+
+def get_twoway_differences_summary(results: Dict[str, FullTwoWayAnalysisResult]) -> pd.DataFrame:
+    """Create summary table of two-way ANOVA results across all analytes."""
+    rows = []
+    for name, result in results.items():
+        if result is None:
+            continue
+        
+        tw = result.twoway_result
+        
+        def _stars(p):
+            if np.isnan(p): return ''
+            if p < 0.001: return '***'
+            if p < 0.01: return '**'
+            if p < 0.05: return '*'
+            return ''
+        
+        n_sig_posthoc = 0
+        if tw.posthoc_results is not None:
+            n_sig_posthoc = tw.posthoc_results['significant'].sum()
+        
+        rows.append({
+            'Variable': name,
+            'Test': tw.test_type.value,
+            f'{tw.factor_a_name} F': f"{tw.factor_a_stat:.2f}" if not np.isnan(tw.factor_a_stat) else 'N/A',
+            f'{tw.factor_a_name} p': f"{tw.factor_a_pvalue:.4f}" if not np.isnan(tw.factor_a_pvalue) else 'N/A',
+            f'{tw.factor_a_name} sig': _stars(tw.factor_a_pvalue),
+            f'{tw.factor_b_name} F': f"{tw.factor_b_stat:.2f}" if not np.isnan(tw.factor_b_stat) else 'N/A',
+            f'{tw.factor_b_name} p': f"{tw.factor_b_pvalue:.4f}" if not np.isnan(tw.factor_b_pvalue) else 'N/A',
+            f'{tw.factor_b_name} sig': _stars(tw.factor_b_pvalue),
+            'Interaction F': f"{tw.interaction_stat:.2f}" if not np.isnan(tw.interaction_stat) else 'N/A',
+            'Interaction p': f"{tw.interaction_pvalue:.4f}" if not np.isnan(tw.interaction_pvalue) else 'N/A',
+            'Interaction sig': _stars(tw.interaction_pvalue),
+            'Post-hoc type': tw.posthoc_type,
+            'Sig. post-hoc pairs': n_sig_posthoc,
         })
     
     return pd.DataFrame(rows)
@@ -190,7 +244,10 @@ class ExcelReportGenerator:
         totals: Optional[pd.DataFrame] = None,
         ratios: Optional[pd.DataFrame] = None,
         percentages: Optional[pd.DataFrame] = None,
-        alpha: float = 0.05
+        alpha: float = 0.05,
+        # Two-way ANOVA factor info
+        factors: Optional[Dict[str, str]] = None,  # {display_name: column_name}
+        n_factors: int = 0,
     ):
         """
         Initialize report generator.
@@ -204,6 +261,8 @@ class ExcelReportGenerator:
             ratios: Pre-computed ratios DataFrame
             percentages: Pre-computed percentages DataFrame
             alpha: Significance level for statistical tests
+            factors: Dict of {factor_display_name: factor_column_name} for two-way ANOVA
+            n_factors: Number of factors (0=auto, 1=one-way, 2=two-way)
         """
         self.data = data.copy()
         self.group_col = group_col
@@ -212,6 +271,10 @@ class ExcelReportGenerator:
         self.totals = totals
         self.ratios = ratios
         self.percentages = percentages
+        
+        # Two-way factor info
+        self.factors = factors or {}
+        self.n_factors = n_factors
         
         # Identify sphingolipid columns
         if sphingolipid_cols:
@@ -229,6 +292,16 @@ class ExcelReportGenerator:
         # Filter valid groups
         valid_data = self.data[self.data[self.group_col].notna()].copy()
         valid_data = valid_data[valid_data[self.group_col].astype(str).str.lower() != 'nan']
+        
+        # ================================================================
+        # TWO-WAY BRANCH: if n_factors == 2, use two-way ANOVA for all
+        # ================================================================
+        if self.n_factors == 2 and len(self.factors) >= 2:
+            return self._run_all_twoway_statistics(valid_data)
+        
+        # ================================================================
+        # ONE-WAY BRANCH: existing code path (completely unchanged)
+        # ================================================================
         
         # 1. Individual sphingolipids
         for sl in self.sl_cols:
@@ -280,6 +353,86 @@ class ExcelReportGenerator:
         
         return self.results
     
+    def _run_all_twoway_statistics(self, valid_data: pd.DataFrame) -> ComprehensiveAnalysisResults:
+        """
+        Run two-way ANOVA for all analytes when n_factors == 2.
+        
+        This replaces the one-way path entirely when a two-factor
+        design is detected.
+        """
+        factor_items = list(self.factors.items())
+        fa_name, fa_col = factor_items[0]
+        fb_name, fb_col = factor_items[1]
+        
+        self.results.is_twoway = True
+        self.results.factor_a_name = fa_name
+        self.results.factor_b_name = fb_name
+        self.results.factor_a_col = fa_col
+        self.results.factor_b_col = fb_col
+        
+        # Verify factor columns exist in data
+        if fa_col not in valid_data.columns or fb_col not in valid_data.columns:
+            print(f"⚠ Factor columns not found in data: {fa_col}, {fb_col}")
+            return self.results
+        
+        # 1. Individual sphingolipids
+        for sl in self.sl_cols:
+            if sl in valid_data.columns:
+                try:
+                    result = self.analyzer.analyze_twoway(
+                        valid_data, sl, fa_col, fb_col, fa_name, fb_name
+                    )
+                    self.results.twoway_individual_sl[sl] = result
+                except Exception as e:
+                    print(f"Could not analyze {sl} (two-way): {e}")
+        
+        # 2. Totals
+        if self.totals is not None:
+            combined = pd.concat([valid_data[[fa_col, fb_col]], self.totals.loc[valid_data.index]], axis=1)
+            for col in self.totals.columns:
+                if not combined[col].isna().all():
+                    try:
+                        result = self.analyzer.analyze_twoway(
+                            combined, col, fa_col, fb_col, fa_name, fb_name
+                        )
+                        self.results.twoway_totals[col] = result
+                    except Exception as e:
+                        print(f"Could not analyze {col} (two-way): {e}")
+        
+        # 3. Ratios
+        if self.ratios is not None:
+            combined = pd.concat([valid_data[[fa_col, fb_col]], self.ratios.loc[valid_data.index]], axis=1)
+            for col in self.ratios.columns:
+                if not combined[col].isna().all():
+                    try:
+                        result = self.analyzer.analyze_twoway(
+                            combined, col, fa_col, fb_col, fa_name, fb_name
+                        )
+                        self.results.twoway_ratios[col] = result
+                    except Exception as e:
+                        print(f"Could not analyze {col} (two-way): {e}")
+        
+        # 4. Percentages
+        if self.percentages is not None:
+            combined = pd.concat([valid_data[[fa_col, fb_col]], self.percentages.loc[valid_data.index]], axis=1)
+            for col in self.percentages.columns:
+                if not combined[col].isna().all():
+                    try:
+                        result = self.analyzer.analyze_twoway(
+                            combined, col, fa_col, fb_col, fa_name, fb_name
+                        )
+                        self.results.twoway_percentages[col] = result
+                    except Exception as e:
+                        print(f"Could not analyze {col} (two-way): {e}")
+        
+        # 5. Category sheets (one-way still generated for backward compat)
+        self.generate_all_sheets()
+        for cat_name, sheet in self.analysis_sheets.items():
+            if sheet.statistical_result:
+                self.results.category_results[cat_name] = sheet.statistical_result
+        
+        return self.results
+    
     def _calculate_sheet_data(
         self,
         category_name: str,
@@ -293,6 +446,12 @@ class ExcelReportGenerator:
         if self.sample_id_col and self.sample_id_col in self.data.columns:
             id_cols = [self.sample_id_col] + id_cols
         
+        # For two-way designs, include all factor columns
+        if self.n_factors >= 2:
+            for factor_name, factor_col in self.factors.items():
+                if factor_col in self.data.columns and factor_col not in id_cols:
+                    id_cols.append(factor_col)
+        
         available_sl_cols = [c for c in sl_columns if c in self.data.columns]
         raw_data = self.data[id_cols + available_sl_cols].copy()
         
@@ -304,10 +463,28 @@ class ExcelReportGenerator:
         raw_data['Pct_of_Total_SL'] = (raw_data['Total'] / all_sl_total * 100).round(2)
         
         # Group summary statistics
-        group_totals = raw_data.groupby(self.group_col).agg({
+        # In two-way mode, create factorial group for summary
+        if self.n_factors >= 2 and len(self.factors) >= 2:
+            factor_cols = [fc for fc in self.factors.values() if fc in raw_data.columns]
+            factor_names = list(self.factors.keys())
+            if len(factor_cols) >= 2:
+                raw_data['_factorial_group_'] = raw_data[factor_cols[0]].astype(str) + ' / ' + raw_data[factor_cols[1]].astype(str)
+                summary_group_col = '_factorial_group_'
+                summary_group_label = f'{factor_names[0]} / {factor_names[1]}'
+            else:
+                summary_group_col = self.group_col
+                summary_group_label = self.group_col
+        else:
+            summary_group_col = self.group_col
+            summary_group_label = self.group_col
+        
+        group_totals = raw_data.groupby(summary_group_col).agg({
             'Total': ['count', 'mean', 'std', 'sem', 'median', 'min', 'max'],
             'Pct_of_Total_SL': ['mean', 'std', 'sem']
         }).round(4)
+        
+        # Rename the index to use readable label
+        group_totals.index.name = summary_group_label
         
         # Flatten column names
         group_totals.columns = ['_'.join(col).strip() for col in group_totals.columns]
@@ -324,21 +501,39 @@ class ExcelReportGenerator:
                 raw_data[f'{sl}_pct'] = (raw_data[sl] / raw_data['Total'] * 100).round(2)
             
             pct_cols = [f'{sl}_pct' for sl in available_sl_cols]
-            group_percentages = raw_data.groupby(self.group_col)[pct_cols].mean().round(2)
+            group_percentages = raw_data.groupby(summary_group_col)[pct_cols].mean().round(2)
+            group_percentages.index.name = summary_group_label
         
         # Statistical analysis
         stat_result = None
-        if len(self.data[self.group_col].unique()) >= 2:
+        if self.n_factors >= 2 and len(self.factors) >= 2:
+            # Two-way mode: run two-way ANOVA on the category total
+            factor_cols_list = list(self.factors.values())
+            fa_col = factor_cols_list[0]
+            fb_col = factor_cols_list[1]
+            fa_name = list(self.factors.keys())[0]
+            fb_name = list(self.factors.keys())[1]
+            if fa_col in raw_data.columns and fb_col in raw_data.columns:
+                try:
+                    stat_result = self.analyzer.analyze_twoway(
+                        raw_data, 'Total', fa_col, fb_col, fa_name, fb_name
+                    )
+                except Exception as e:
+                    print(f"Could not run two-way ANOVA for {category_name}: {e}")
+        elif len(self.data[self.group_col].unique()) >= 2:
             try:
                 stat_result = self.analyzer.analyze(raw_data, 'Total', self.group_col)
             except Exception as e:
                 print(f"Could not analyze {category_name}: {e}")
         
+        # Drop internal columns before storing
+        export_raw_data = raw_data.drop(columns=['_factorial_group_'], errors='ignore')
+        
         return AnalysisSheet(
             name=category_name,
             description=description,
             sphingolipid_columns=available_sl_cols,
-            raw_data=raw_data,
+            raw_data=export_raw_data,
             group_totals=group_totals,
             group_percentages=group_percentages,
             statistical_result=stat_result
@@ -419,51 +614,129 @@ class ExcelReportGenerator:
                                    index=False, header=False)
             current_row += 1
             
-            # APA formatted result
-            apa_df = pd.DataFrame({'APA Format': [format_apa_statistics(result)]})
-            apa_df.to_excel(writer, sheet_name=sheet_name, startrow=current_row, index=False)
-            current_row += 2
-            
-            # Assumption tests
-            assumptions_data = {
-                'Test': ['Normality Test', 'Homoscedasticity Test'],
-                'Result': [
-                    'Passed' if result.assumptions.overall_normality else 'Failed',
-                    'Passed' if result.assumptions.homoscedasticity_passed else 'Failed'
-                ],
-                'P-value': [
-                    ', '.join([f"{g}: {p:.4f}" for g, p in result.assumptions.normality_pvalues.items()]),
-                    f"{result.assumptions.homoscedasticity_pvalue:.4f}"
-                ]
-            }
-            assumptions_df = pd.DataFrame(assumptions_data)
-            assumptions_df.to_excel(writer, sheet_name=sheet_name, startrow=current_row, index=False)
-            current_row += 4
-            
-            # Main test result
-            main_test_data = {
-                'Test Used': [result.main_test.test_type.value],
-                'Reason': [result.assumptions.recommendation_reason],
-                'Statistic': [f"{result.main_test.statistic:.4f}"],
-                'P-value': [f"{result.main_test.pvalue:.6f}"],
-                'Significant': ['Yes' if result.main_test.significant else 'No'],
-                'Effect Size': [f"{result.main_test.effect_size:.4f}" if result.main_test.effect_size else 'N/A'],
-                'Effect Type': [result.main_test.effect_size_type or 'N/A'],
-                'Interpretation': [result.main_test.effect_size_interpretation or 'N/A']
-            }
-            main_test_df = pd.DataFrame(main_test_data)
-            main_test_df.to_excel(writer, sheet_name=sheet_name, startrow=current_row, index=False)
-            current_row += 4
-            
-            # Post-hoc results
-            if result.posthoc_test and result.posthoc_test.pairwise_results is not None:
-                section_header = pd.DataFrame({'': [f'POST-HOC COMPARISONS ({result.posthoc_test.test_type.value})']})
-                section_header.to_excel(writer, sheet_name=sheet_name, startrow=current_row,
-                                       index=False, header=False)
+            # Check if this is a two-way result or one-way result
+            if isinstance(result, FullTwoWayAnalysisResult):
+                # ============================================================
+                # TWO-WAY ANOVA RESULTS
+                # ============================================================
+                tw = result.twoway_result
+                fa_name = self.results.factor_a_name if self.results.factor_a_name else 'Factor A'
+                fb_name = self.results.factor_b_name if self.results.factor_b_name else 'Factor B'
+                
+                # Test type
+                test_label = pd.DataFrame({'': [f'Test: {tw.test_type.value} ({fa_name} × {fb_name})']})
+                test_label.to_excel(writer, sheet_name=sheet_name, startrow=current_row,
+                                   index=False, header=False)
                 current_row += 1
                 
-                posthoc_df = result.posthoc_test.pairwise_results.copy()
-                posthoc_df.to_excel(writer, sheet_name=sheet_name, startrow=current_row, index=False)
+                # APA formatted result
+                apa_text = format_twoway_apa(result)
+                apa_df = pd.DataFrame({'APA Format': [apa_text]})
+                apa_df.to_excel(writer, sheet_name=sheet_name, startrow=current_row, index=False)
+                current_row += 2
+                
+                # ANOVA table
+                if tw.anova_table is not None and not tw.anova_table.empty:
+                    anova_header = pd.DataFrame({'': ['ANOVA Table']})
+                    anova_header.to_excel(writer, sheet_name=sheet_name, startrow=current_row,
+                                         index=False, header=False)
+                    current_row += 1
+                    tw.anova_table.to_excel(writer, sheet_name=sheet_name,
+                                            startrow=current_row, index=False)
+                    current_row += len(tw.anova_table) + 1
+                else:
+                    # Build manual ANOVA summary
+                    anova_rows = []
+                    for source, stat, pval, es_key in [
+                        (fa_name, tw.factor_a_stat, tw.factor_a_pvalue, fa_name),
+                        (fb_name, tw.factor_b_stat, tw.factor_b_pvalue, fb_name),
+                        (f'{fa_name}×{fb_name}', tw.interaction_stat, tw.interaction_pvalue, 
+                         f'{fa_name}×{fb_name}'),
+                    ]:
+                        sig = 'Yes' if (not np.isnan(pval) and pval < tw.alpha) else ('No' if not np.isnan(pval) else 'N/A')
+                        anova_rows.append({
+                            'Source': source,
+                            'F': f'{stat:.4f}' if not np.isnan(stat) else 'N/A',
+                            'p': f'{pval:.6f}' if not np.isnan(pval) else 'N/A',
+                            'partial_η²': f'{tw.effect_sizes.get(es_key, np.nan):.4f}' 
+                                if not np.isnan(tw.effect_sizes.get(es_key, np.nan)) else 'N/A',
+                            'Significant': sig
+                        })
+                    anova_df = pd.DataFrame(anova_rows)
+                    anova_df.to_excel(writer, sheet_name=sheet_name,
+                                      startrow=current_row, index=False)
+                    current_row += len(anova_df) + 1
+                
+                # Cell descriptive stats
+                if result.descriptive_stats is not None and not result.descriptive_stats.empty:
+                    desc = result.descriptive_stats.copy()
+                    desc = desc[(desc['factor_a'] != '__MARGINAL__') & (desc['factor_b'] != '__MARGINAL__')]
+                    if not desc.empty:
+                        desc_header = pd.DataFrame({'': ['Cell Descriptive Statistics']})
+                        desc_header.to_excel(writer, sheet_name=sheet_name, startrow=current_row,
+                                            index=False, header=False)
+                        current_row += 1
+                        desc.to_excel(writer, sheet_name=sheet_name, startrow=current_row, index=False)
+                        current_row += len(desc) + 1
+                
+                # Post-hoc results
+                if tw.posthoc_results is not None and not tw.posthoc_results.empty:
+                    ph_header = pd.DataFrame({'': [f'Post-hoc: {tw.posthoc_type}']})
+                    ph_header.to_excel(writer, sheet_name=sheet_name, startrow=current_row,
+                                      index=False, header=False)
+                    current_row += 1
+                    tw.posthoc_results.to_excel(writer, sheet_name=sheet_name,
+                                                startrow=current_row, index=False)
+            else:
+                # ============================================================
+                # ONE-WAY ANALYSIS RESULTS (unchanged)
+                # ============================================================
+                
+                # APA formatted result
+                apa_df = pd.DataFrame({'APA Format': [format_apa_statistics(result)]})
+                apa_df.to_excel(writer, sheet_name=sheet_name, startrow=current_row, index=False)
+                current_row += 2
+                
+                # Assumption tests
+                assumptions_data = {
+                    'Test': ['Normality Test', 'Homoscedasticity Test'],
+                    'Result': [
+                        'Passed' if result.assumptions.overall_normality else 'Failed',
+                        'Passed' if result.assumptions.homoscedasticity_passed else 'Failed'
+                    ],
+                    'P-value': [
+                        ', '.join([f"{g}: {p:.4f}" for g, p in result.assumptions.normality_pvalues.items()]),
+                        f"{result.assumptions.homoscedasticity_pvalue:.4f}"
+                    ]
+                }
+                assumptions_df = pd.DataFrame(assumptions_data)
+                assumptions_df.to_excel(writer, sheet_name=sheet_name, startrow=current_row, index=False)
+                current_row += 4
+                
+                # Main test result
+                main_test_data = {
+                    'Test Used': [result.main_test.test_type.value],
+                    'Reason': [result.assumptions.recommendation_reason],
+                    'Statistic': [f"{result.main_test.statistic:.4f}"],
+                    'P-value': [f"{result.main_test.pvalue:.6f}"],
+                    'Significant': ['Yes' if result.main_test.significant else 'No'],
+                    'Effect Size': [f"{result.main_test.effect_size:.4f}" if result.main_test.effect_size else 'N/A'],
+                    'Effect Type': [result.main_test.effect_size_type or 'N/A'],
+                    'Interpretation': [result.main_test.effect_size_interpretation or 'N/A']
+                }
+                main_test_df = pd.DataFrame(main_test_data)
+                main_test_df.to_excel(writer, sheet_name=sheet_name, startrow=current_row, index=False)
+                current_row += 4
+                
+                # Post-hoc results
+                if result.posthoc_test and result.posthoc_test.pairwise_results is not None:
+                    section_header = pd.DataFrame({'': [f'POST-HOC COMPARISONS ({result.posthoc_test.test_type.value})']})
+                    section_header.to_excel(writer, sheet_name=sheet_name, startrow=current_row,
+                                           index=False, header=False)
+                    current_row += 1
+                    
+                    posthoc_df = result.posthoc_test.pairwise_results.copy()
+                    posthoc_df.to_excel(writer, sheet_name=sheet_name, startrow=current_row, index=False)
     
     def save_excel_report(self, filepath) -> Path:
         """Save complete Excel report with all analysis sheets."""
@@ -472,14 +745,306 @@ class ExcelReportGenerator:
             self.generate_all_sheets()
         
         with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
-            # Overview sheet first
-            self._write_overview_sheet(writer)
-            
-            # Individual analysis sheets
-            for sheet_name, sheet in self.analysis_sheets.items():
-                self._write_sheet(writer, sheet)
+            if self.n_factors >= 2 and self.results.is_twoway:
+                # ============================================================
+                # TWO-WAY ANOVA REPORT
+                # ============================================================
+                self._write_twoway_overview_sheet(writer)
+                
+                # Individual sphingolipids
+                if self.results.twoway_individual_sl:
+                    self._write_twoway_results_sheet(
+                        writer, 'Individual_SL',
+                        'Individual Sphingolipid Two-Way ANOVA',
+                        self.results.twoway_individual_sl
+                    )
+                
+                # Totals
+                if self.results.twoway_totals:
+                    self._write_twoway_results_sheet(
+                        writer, 'Totals',
+                        'Total Sphingolipid Categories Two-Way ANOVA',
+                        self.results.twoway_totals
+                    )
+                
+                # Ratios
+                if self.results.twoway_ratios:
+                    self._write_twoway_results_sheet(
+                        writer, 'Ratios',
+                        'Clinical Ratios Two-Way ANOVA',
+                        self.results.twoway_ratios
+                    )
+                
+                # Percentages
+                if self.results.twoway_percentages:
+                    self._write_twoway_results_sheet(
+                        writer, 'Percentages',
+                        'Sphingolipid Percentages Two-Way ANOVA',
+                        self.results.twoway_percentages
+                    )
+                
+                # Also include category sheets for reference
+                for sheet_name, sheet in self.analysis_sheets.items():
+                    self._write_sheet(writer, sheet)
+            else:
+                # ============================================================
+                # ONE-WAY REPORT (unchanged)
+                # ============================================================
+                self._write_overview_sheet(writer)
+                for sheet_name, sheet in self.analysis_sheets.items():
+                    self._write_sheet(writer, sheet)
         
         return filepath
+    
+    def _write_twoway_overview_sheet(self, writer: pd.ExcelWriter):
+        """Write overview sheet for two-way ANOVA report."""
+        from openpyxl.styles import Font, PatternFill, Alignment
+        
+        current_row = 0
+        sheet_name = 'Overview'
+        
+        # Title
+        title_df = pd.DataFrame({'': ['SPHINGOLIPID ANALYSIS REPORT — TWO-WAY ANOVA']})
+        title_df.to_excel(writer, sheet_name=sheet_name, startrow=current_row,
+                         index=False, header=False)
+        current_row += 2
+        
+        # Design info
+        fa_name = self.results.factor_a_name
+        fb_name = self.results.factor_b_name
+        fa_col = self.results.factor_a_col
+        fb_col = self.results.factor_b_col
+        
+        valid_data = self.data[self.data[self.group_col].notna()].copy()
+        valid_data = valid_data[valid_data[self.group_col].astype(str).str.lower() != 'nan']
+        
+        fa_levels = sorted(valid_data[fa_col].unique().astype(str))
+        fb_levels = sorted(valid_data[fb_col].unique().astype(str))
+        
+        # Cell sizes
+        cell_sizes = []
+        for a in fa_levels:
+            for b in fb_levels:
+                n = len(valid_data[(valid_data[fa_col].astype(str) == a) & (valid_data[fb_col].astype(str) == b)])
+                cell_sizes.append(f"{a}-{b}: n={n}")
+        
+        summary_data = {
+            'Parameter': [
+                'Total Samples', 'Experimental Design', 
+                f'Factor A: {fa_name}', f'Factor B: {fb_name}',
+                'Cell Sizes', 'Sphingolipids Measured', 
+                'Significance Level', 'Non-parametric Method'
+            ],
+            'Value': [
+                len(valid_data), f'{fa_name} x {fb_name} factorial',
+                ', '.join(fa_levels), ', '.join(fb_levels),
+                '; '.join(cell_sizes), len(self.sl_cols),
+                f'\u03b1 = {self.alpha}', 'ART ANOVA (when assumptions violated)'
+            ]
+        }
+        summary_df = pd.DataFrame(summary_data)
+        summary_df.to_excel(writer, sheet_name=sheet_name, startrow=current_row, index=False)
+        current_row += len(summary_df) + 3
+        
+        # =====================================================================
+        # SUMMARY TABLE: Individual Sphingolipids
+        # =====================================================================
+        section_header = pd.DataFrame({'': ['INDIVIDUAL SPHINGOLIPID RESULTS SUMMARY']})
+        section_header.to_excel(writer, sheet_name=sheet_name, startrow=current_row,
+                               index=False, header=False)
+        current_row += 1
+        
+        if self.results.twoway_individual_sl:
+            summary = get_twoway_differences_summary(self.results.twoway_individual_sl)
+            summary.to_excel(writer, sheet_name=sheet_name, startrow=current_row, index=False)
+            current_row += len(summary) + 3
+        
+        # =====================================================================
+        # SUMMARY TABLE: Totals
+        # =====================================================================
+        section_header = pd.DataFrame({'': ['TOTAL CATEGORIES RESULTS SUMMARY']})
+        section_header.to_excel(writer, sheet_name=sheet_name, startrow=current_row,
+                               index=False, header=False)
+        current_row += 1
+        
+        if self.results.twoway_totals:
+            summary = get_twoway_differences_summary(self.results.twoway_totals)
+            summary.to_excel(writer, sheet_name=sheet_name, startrow=current_row, index=False)
+            current_row += len(summary) + 3
+        
+        # =====================================================================
+        # SUMMARY TABLE: Ratios
+        # =====================================================================
+        section_header = pd.DataFrame({'': ['CLINICAL RATIOS RESULTS SUMMARY']})
+        section_header.to_excel(writer, sheet_name=sheet_name, startrow=current_row,
+                               index=False, header=False)
+        current_row += 1
+        
+        if self.results.twoway_ratios:
+            summary = get_twoway_differences_summary(self.results.twoway_ratios)
+            summary.to_excel(writer, sheet_name=sheet_name, startrow=current_row, index=False)
+            current_row += len(summary) + 3
+        
+        # =====================================================================
+        # SUMMARY TABLE: Percentages
+        # =====================================================================
+        section_header = pd.DataFrame({'': ['PERCENTAGE COMPOSITION RESULTS SUMMARY']})
+        section_header.to_excel(writer, sheet_name=sheet_name, startrow=current_row,
+                               index=False, header=False)
+        current_row += 1
+        
+        if self.results.twoway_percentages:
+            summary = get_twoway_differences_summary(self.results.twoway_percentages)
+            summary.to_excel(writer, sheet_name=sheet_name, startrow=current_row, index=False)
+            current_row += len(summary) + 3
+        
+        # Auto-adjust column widths
+        ws = writer.sheets[sheet_name]
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            ws.column_dimensions[column_letter].width = min(max_length + 2, 60)
+    
+    def _write_twoway_results_sheet(
+        self,
+        writer: pd.ExcelWriter,
+        sheet_name: str,
+        title: str,
+        tw_results: Dict[str, FullTwoWayAnalysisResult]
+    ):
+        """Write a two-way ANOVA results sheet for a category of variables."""
+        
+        sheet_name = sheet_name[:31]  # Excel limit
+        current_row = 0
+        
+        fa_name = self.results.factor_a_name
+        fb_name = self.results.factor_b_name
+        
+        # Title
+        title_df = pd.DataFrame({'': [title]})
+        title_df.to_excel(writer, sheet_name=sheet_name, startrow=current_row,
+                         index=False, header=False)
+        current_row += 1
+        design_df = pd.DataFrame({'': [f'Design: {fa_name} x {fb_name}']})
+        design_df.to_excel(writer, sheet_name=sheet_name, startrow=current_row,
+                         index=False, header=False)
+        current_row += 2
+        
+        # =====================================================================
+        # SECTION 1: Summary table (all variables at once)
+        # =====================================================================
+        section_header = pd.DataFrame({'': ['OMNIBUS RESULTS SUMMARY']})
+        section_header.to_excel(writer, sheet_name=sheet_name, startrow=current_row,
+                               index=False, header=False)
+        current_row += 1
+        
+        summary = get_twoway_differences_summary(tw_results)
+        summary.to_excel(writer, sheet_name=sheet_name, startrow=current_row, index=False)
+        current_row += len(summary) + 3
+        
+        # =====================================================================
+        # SECTION 2: ANOVA tables for each variable  
+        # =====================================================================
+        section_header = pd.DataFrame({'': ['DETAILED ANOVA TABLES']})
+        section_header.to_excel(writer, sheet_name=sheet_name, startrow=current_row,
+                               index=False, header=False)
+        current_row += 2
+        
+        for var_name, result in tw_results.items():
+            tw = result.twoway_result
+            
+            # Variable header
+            var_header = pd.DataFrame({'': [f'--- {var_name} ---']})
+            var_header.to_excel(writer, sheet_name=sheet_name, startrow=current_row,
+                               index=False, header=False)
+            current_row += 1
+            
+            # Test type
+            test_label = pd.DataFrame({'': [f'Test: {tw.test_type.value}']})
+            test_label.to_excel(writer, sheet_name=sheet_name, startrow=current_row,
+                               index=False, header=False)
+            current_row += 1
+            
+            # ANOVA table
+            if tw.anova_table is not None and not tw.anova_table.empty:
+                tw.anova_table.to_excel(writer, sheet_name=sheet_name, 
+                                        startrow=current_row, index=False)
+                current_row += len(tw.anova_table) + 1
+            else:
+                # Build ANOVA table manually from results
+                anova_rows = []
+                for source, stat, pval, df_tup, es_key in [
+                    (fa_name, tw.factor_a_stat, tw.factor_a_pvalue, tw.factor_a_df, fa_name),
+                    (fb_name, tw.factor_b_stat, tw.factor_b_pvalue, tw.factor_b_df, fb_name),
+                    (f'{fa_name}\u00d7{fb_name}', tw.interaction_stat, tw.interaction_pvalue, 
+                     tw.interaction_df, f'{fa_name}\u00d7{fb_name}'),
+                ]:
+                    anova_rows.append({
+                        'Source': source,
+                        'F': f'{stat:.4f}' if not np.isnan(stat) else 'N/A',
+                        'df_num': df_tup[0] if len(df_tup) > 0 else 'N/A',
+                        'df_den': df_tup[1] if len(df_tup) > 1 else 'N/A',
+                        'p': f'{pval:.6f}' if not np.isnan(pval) else 'N/A',
+                        'partial_\u03b7\u00b2': f'{tw.effect_sizes.get(es_key, np.nan):.4f}' 
+                            if not np.isnan(tw.effect_sizes.get(es_key, np.nan)) else 'N/A',
+                        'Significant': 'Yes' if pval < tw.alpha else 'No' 
+                            if not np.isnan(pval) else 'N/A'
+                    })
+                anova_df = pd.DataFrame(anova_rows)
+                anova_df.to_excel(writer, sheet_name=sheet_name,
+                                  startrow=current_row, index=False)
+                current_row += len(anova_df) + 1
+            
+            # APA formatted result
+            apa_text = format_twoway_apa(result)
+            apa_df = pd.DataFrame({'APA Format': [apa_text]})
+            apa_df.to_excel(writer, sheet_name=sheet_name, startrow=current_row, index=False)
+            current_row += 2
+            
+            # Cell descriptive stats
+            if result.descriptive_stats is not None and not result.descriptive_stats.empty:
+                desc = result.descriptive_stats.copy()
+                # Filter out marginal rows for clean display
+                desc = desc[desc['factor_a'] != '__MARGINAL__']
+                desc = desc[desc['factor_b'] != '__MARGINAL__']
+                if not desc.empty:
+                    desc_header = pd.DataFrame({'': ['Cell Descriptive Statistics']})
+                    desc_header.to_excel(writer, sheet_name=sheet_name, startrow=current_row,
+                                        index=False, header=False)
+                    current_row += 1
+                    desc.to_excel(writer, sheet_name=sheet_name, startrow=current_row, index=False)
+                    current_row += len(desc) + 1
+            
+            # Post-hoc results
+            if tw.posthoc_results is not None and not tw.posthoc_results.empty:
+                ph_header = pd.DataFrame({'': [f'Post-hoc: {tw.posthoc_type}']})
+                ph_header.to_excel(writer, sheet_name=sheet_name, startrow=current_row,
+                                  index=False, header=False)
+                current_row += 1
+                tw.posthoc_results.to_excel(writer, sheet_name=sheet_name, 
+                                            startrow=current_row, index=False)
+                current_row += len(tw.posthoc_results) + 1
+            
+            current_row += 1  # Extra spacing between variables
+        
+        # Auto-adjust column widths
+        ws = writer.sheets[sheet_name]
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            ws.column_dimensions[column_letter].width = min(max_length + 2, 50)
     
     def _write_overview_sheet(self, writer: pd.ExcelWriter):
         """Write overview/summary sheet."""
