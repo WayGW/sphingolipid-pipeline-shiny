@@ -1683,7 +1683,7 @@ def main():
         - **Values:** Concentrations (typically ng/mL)
         - **Below LOD:** Can be "-----", "LOD", "BLQ", "ND", etc.
         """)
-        
+        st.markdown("""**For Multiple Independent Variables need to add "Factor_" in front of it""")
         st.markdown("**Example:**")
         
         # Create example dataframe
@@ -1698,6 +1698,21 @@ def main():
         })
         st.dataframe(example_df, hide_index=True, use_container_width=False)
         
+        st.markdown("""**For Multiple Independent Variables need to add "Factor_" in front of it""")
+        st.markdown("**Example:**")
+        # Create example dataframe
+        example_df = pd.DataFrame({
+            'Factor_Age': ['Aged', 'Aged', 'Young'],
+            'Factor_Sex': ['Male', 'Female', 'Female'],
+            'Sample_ID': ['S001', 'S002', 'S003'],
+            'C16 Cer': [125.4, 142.8, 98.6],
+            'C24-0 Cer': [312.5, 287.9, '-----'],
+            'C16-SM': [1520.3, 1380.7, 1245.2],
+            'S-d18-1': [15.2, 18.4, 12.8],
+            '...': ['...', '...', '...']
+        })
+        st.dataframe(example_df, hide_index=True, use_container_width=False)
+
         st.info("""💡 **Auto-Detection Features:**
 - Sphingolipid columns are auto-detected from your data
 - Group assignments are inferred automatically  
