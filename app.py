@@ -1655,14 +1655,17 @@ def main():
         st.markdown("---")
         st.markdown("## 📋 Expected Input Format")
         
-        st.markdown("### LC-MS sheet")
+        st.markdown("### Sample sheet")
         st.markdown("""
-        - **Rows:** First few are Std curves, followed by samples
-        - **Columns:** "Data Filename" (Std curve and sample names), followed by sphingolipid species
+        - **Rows:** Samples
+        - **Columns:** Sphingolipid species (matching panel names)
+        - **First column(s):** Sample ID, Group/Type
+        - **Values:** Concentrations (typically ng/mL)
+        - **Below LOD:** Can be "-----", "LOD", "BLQ", "ND", etc.
         """)
-
-
+        st.markdown("""**For Multiple Independent Variables need to add "Factor_" in front of it""")
         st.markdown("**Example:**")
+        
         # Create example dataframe
         example_df = pd.DataFrame({
             'Type': ['Aged', 'Aged', 'Young'],
@@ -1690,18 +1693,14 @@ def main():
         })
         st.dataframe(example_df, hide_index=True, use_container_width=False)
         
-
-        st.markdown("### Sample sheet")
-        st.markdown("""
-        - **Rows:** Samples
-        - **Columns:** Sphingolipid species (matching panel names)
-        - **First column(s):** Sample ID, Group/Type
-        - **Values:** Concentrations (typically ng/mL)
-        - **Below LOD:** Can be "-----", "LOD", "BLQ", "ND", etc.
-        """)
-        st.markdown("""**For Multiple Independent Variables need to add "Factor_" in front of it""")
-        st.markdown("**Example:**")
         
+        st.markdown("### LC-MS sheet")
+        st.markdown("""
+        - **Rows:** First few are Std curves, followed by samples
+        - **Columns:** "Data Filename" (Std curve and sample names), followed by sphingolipid species
+        """)
+        st.markdown("**Example:**")
+
         # Create example dataframe
         example_lcms_df = pd.DataFrame({
             'Data Filename': ['Std 1 ngmL', 'Std 3  ngmL', 'Std 10 ngmL'],
