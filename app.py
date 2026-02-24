@@ -201,7 +201,8 @@ def init_session_state():
         'report_generator': None,
         'stats_computed': False,
         'last_file': None,
-        'last_settings': None  # Track settings that affect data/stats
+        'last_settings': None,  # Track settings that affect data/stats
+        'selected_sheet': None,  # User's current sheet selection
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -1561,23 +1562,57 @@ def main():
             st.session_state.figures = {}
             st.session_state.last_file = uploaded.name
             st.session_state.last_settings = None  # Reset settings tracking for new file
-        
+            st.session_state.selected_sheet = None  # Reset sheet selection for new file
+
+        # Write uploaded file to temp file (needed for reading sheet names)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(uploaded.name).suffix) as tmp:
+            tmp.write(uploaded.getvalue())
+            tmp_path = tmp.name
+
+        # Get selectable sheets and show dropdown
+        processor = SphingolipidDataProcessor(lod_handling=settings['lod_handling'], lod_value=settings['lod_value'])
+        try:
+            selectable_sheets, auto_detected_sheet = processor.get_selectable_sheets(tmp_path)
+        except Exception as e:
+            st.error(f"Error reading file: {e}")
+            return
+
+        if len(selectable_sheets) > 1:
+            # Determine default: use previous selection if still valid, otherwise auto-detected
+            if st.session_state.selected_sheet in selectable_sheets:
+                default_idx = selectable_sheets.index(st.session_state.selected_sheet)
+            else:
+                default_idx = selectable_sheets.index(auto_detected_sheet)
+
+            selected_sheet = st.selectbox(
+                "Select data sheet",
+                selectable_sheets,
+                index=default_idx,
+                help="Choose which sheet contains your sample data. The LC-MS data sheet (standard curves) is excluded."
+            )
+        else:
+            selected_sheet = selectable_sheets[0] if selectable_sheets else None
+
+        # Detect sheet change
+        sheet_changed = (st.session_state.selected_sheet != selected_sheet)
+        if sheet_changed:
+            st.session_state.selected_sheet = selected_sheet
+            st.session_state.stats_computed = False
+            st.session_state.figures = {}
+
         # Check if settings changed (LOD handling, alpha, etc.)
         settings_changed = check_settings_changed(settings)
-        
-        # Reprocess data if file or settings changed
-        if file_changed or settings_changed or st.session_state.processed_data is None:
+
+        # Reprocess data if file, sheet, or settings changed
+        if file_changed or sheet_changed or settings_changed or st.session_state.processed_data is None:
             with st.spinner("Processing data..." + (" (settings changed)" if settings_changed else "")):
-                with tempfile.NamedTemporaryFile(delete=False, suffix=Path(uploaded.name).suffix) as tmp:
-                    tmp.write(uploaded.getvalue())
-                    tmp_path = tmp.name
-                
                 try:
-                    processor = SphingolipidDataProcessor(lod_handling=settings['lod_handling'], lod_value=settings['lod_value'])
-                    processed = processor.load_and_process(tmp_path)
+                    processed = processor.load_and_process(tmp_path, sheet_name=selected_sheet)
                     st.session_state.processed_data = processed
                     if settings_changed:
                         st.success("✅ Data reprocessed with new settings!")
+                    elif sheet_changed:
+                        st.success(f"✅ Data loaded from sheet: {selected_sheet}")
                     else:
                         st.success("✅ Data loaded!")
                 except Exception as e:
