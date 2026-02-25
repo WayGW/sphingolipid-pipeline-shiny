@@ -1522,6 +1522,10 @@ def render_export_tab(processed, settings):
             # Merge with any existing figures (e.g., from viewing tabs)
             combined_figures = {**st.session_state.figures, **all_figures}
             zip_bytes = create_results_zip(processed, results, combined_figures, report_gen, metadata)
+            # Close export figures to free memory
+            for fig in all_figures.values():
+                if fig:
+                    plt.close(fig)
         
         st.download_button("📥 Complete Package (ZIP)", zip_bytes, 
                           f"sphingolipid_analysis_{datetime.now():%Y%m%d_%H%M}.zip", 

@@ -202,20 +202,24 @@ class StatisticalAnalyzer:
             # Not enough data to test
             return np.nan, np.nan, True  # Assume normal if can't test
 
-        if np.ptp(data) == 0:
-            # Constant values (zero variance) - normality is undefined, skip test
+        if np.ptp(data) == 0 or np.std(data) < 1e-10:
+            # Constant or near-constant values - normality is undefined, skip test
             return np.nan, np.nan, True
 
         if len(data) > 5000:
             # For large samples, use D'Agostino-Pearson
             try:
-                stat, p = stats.normaltest(data)
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", RuntimeWarning)
+                    stat, p = stats.normaltest(data)
             except:
                 stat, p = np.nan, 1.0
         else:
             # Shapiro-Wilk for smaller samples
             try:
-                stat, p = stats.shapiro(data)
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", RuntimeWarning)
+                    stat, p = stats.shapiro(data)
             except:
                 stat, p = np.nan, 1.0
         
@@ -1259,9 +1263,10 @@ class StatisticalAnalyzer:
             (fb_name, result.factor_b_stat, result.factor_b_df),
             (f'{fa_name}×{fb_name}', result.interaction_stat, result.interaction_df)
         ]:
-            if not np.isnan(f_val) and df_tup[1] > 0:
+            denom = f_val * df_tup[0] + df_tup[1]
+            if not np.isnan(f_val) and np.isfinite(f_val) and df_tup[1] > 0 and denom > 0:
                 # partial η² ≈ (F * df_num) / (F * df_num + df_den)
-                eta = (f_val * df_tup[0]) / (f_val * df_tup[0] + df_tup[1])
+                eta = (f_val * df_tup[0]) / denom
                 result.effect_sizes[label] = round(max(0, eta), 4)
         
         # Build ANOVA table
