@@ -203,6 +203,8 @@ def init_session_state():
         'last_file': None,
         'last_settings': None,  # Track settings that affect data/stats
         'selected_sheet': None,  # User's current sheet selection
+        'export_zip_cache': None,  # Cached ZIP bytes for export
+        'export_fig_count': 0,  # Number of figures in cached export
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -226,6 +228,7 @@ def check_settings_changed(settings):
         # Settings changed - need to reprocess data and recompute stats
         st.session_state.stats_computed = False
         st.session_state.figures = {}
+        st.session_state.export_zip_cache = None
         st.session_state.last_settings = current
         return True
     return False
@@ -1515,24 +1518,25 @@ def render_export_tab(processed, settings):
                               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                               key="download_excel_report")
         
-        # Generate all figures and ZIP
-        with st.spinner("Generating all figures for export..."):
-            # Generate comprehensive figure set for all dropdown options
-            all_figures = generate_all_export_figures(processed, results, settings)
-            # Merge with any existing figures (e.g., from viewing tabs)
-            combined_figures = {**st.session_state.figures, **all_figures}
-            zip_bytes = create_results_zip(processed, results, combined_figures, report_gen, metadata)
-            # Close export figures to free memory
-            for fig in all_figures.values():
-                if fig:
-                    plt.close(fig)
-        
-        st.download_button("📥 Complete Package (ZIP)", zip_bytes, 
-                          f"sphingolipid_analysis_{datetime.now():%Y%m%d_%H%M}.zip", 
+        # Generate all figures and ZIP (cached to avoid regenerating on every rerun)
+        if st.session_state.export_zip_cache is None:
+            with st.spinner("Generating all figures for export..."):
+                all_figures = generate_all_export_figures(processed, results, settings)
+                combined_figures = {**st.session_state.figures, **all_figures}
+                zip_bytes = create_results_zip(processed, results, combined_figures, report_gen, metadata)
+                # Close export figures to free memory
+                for fig in all_figures.values():
+                    if fig:
+                        plt.close(fig)
+                st.session_state.export_zip_cache = zip_bytes
+                st.session_state.export_fig_count = len(combined_figures)
+
+        st.download_button("📥 Complete Package (ZIP)", st.session_state.export_zip_cache,
+                          f"sphingolipid_analysis_{datetime.now():%Y%m%d_%H%M}.zip",
                           "application/zip",
                           key="download_zip")
-        
-        st.caption(f"📊 Package includes {len(combined_figures)} figures covering all analysis options")
+
+        st.caption(f"📊 Package includes {st.session_state.export_fig_count} figures covering all analysis options")
         st.caption("⭐ = Contains yellow cell highlighting for LOD-replaced values")
     
     st.markdown("---")
@@ -1564,6 +1568,7 @@ def main():
         if file_changed:
             st.session_state.stats_computed = False
             st.session_state.figures = {}
+            st.session_state.export_zip_cache = None
             st.session_state.last_file = uploaded.name
             st.session_state.last_settings = None  # Reset settings tracking for new file
             st.session_state.selected_sheet = None  # Reset sheet selection for new file
@@ -1603,6 +1608,7 @@ def main():
             st.session_state.selected_sheet = selected_sheet
             st.session_state.stats_computed = False
             st.session_state.figures = {}
+            st.session_state.export_zip_cache = None
 
         # Check if settings changed (LOD handling, alpha, etc.)
         settings_changed = check_settings_changed(settings)
