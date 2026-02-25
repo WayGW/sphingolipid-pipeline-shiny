@@ -20,6 +20,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 import warnings
 
+# Suppress expected RuntimeWarnings from scipy when analyzing near-constant
+# or LOD-replaced data groups (divide-by-zero in Shapiro-Wilk, precision loss
+# in moment calculations, etc.)
+warnings.filterwarnings("ignore", category=RuntimeWarning, module=r"scipy\.stats")
+
 
 class TestType(Enum):
     """Types of statistical tests available."""
@@ -209,17 +214,13 @@ class StatisticalAnalyzer:
         if len(data) > 5000:
             # For large samples, use D'Agostino-Pearson
             try:
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore", RuntimeWarning)
-                    stat, p = stats.normaltest(data)
+                stat, p = stats.normaltest(data)
             except:
                 stat, p = np.nan, 1.0
         else:
             # Shapiro-Wilk for smaller samples
             try:
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore", RuntimeWarning)
-                    stat, p = stats.shapiro(data)
+                stat, p = stats.shapiro(data)
             except:
                 stat, p = np.nan, 1.0
         

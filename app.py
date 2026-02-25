@@ -1518,8 +1518,15 @@ def render_export_tab(processed, settings):
                               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                               key="download_excel_report")
         
-        # Generate all figures and ZIP (cached to avoid regenerating on every rerun)
-        if st.session_state.export_zip_cache is None:
+        # Generate ZIP on demand (button click) to avoid slow auto-generation
+        if st.session_state.export_zip_cache is not None:
+            st.download_button("📥 Complete Package (ZIP)", st.session_state.export_zip_cache,
+                              f"sphingolipid_analysis_{datetime.now():%Y%m%d_%H%M}.zip",
+                              "application/zip",
+                              key="download_zip")
+            st.caption(f"📊 Package includes {st.session_state.export_fig_count} figures covering all analysis options")
+            st.caption("⭐ = Contains yellow cell highlighting for LOD-replaced values")
+        elif st.button("📦 Generate Complete Package (ZIP)", key="gen_zip"):
             with st.spinner("Generating all figures for export..."):
                 all_figures = generate_all_export_figures(processed, results, settings)
                 combined_figures = {**st.session_state.figures, **all_figures}
@@ -1530,14 +1537,9 @@ def render_export_tab(processed, settings):
                         plt.close(fig)
                 st.session_state.export_zip_cache = zip_bytes
                 st.session_state.export_fig_count = len(combined_figures)
-
-        st.download_button("📥 Complete Package (ZIP)", st.session_state.export_zip_cache,
-                          f"sphingolipid_analysis_{datetime.now():%Y%m%d_%H%M}.zip",
-                          "application/zip",
-                          key="download_zip")
-
-        st.caption(f"📊 Package includes {st.session_state.export_fig_count} figures covering all analysis options")
-        st.caption("⭐ = Contains yellow cell highlighting for LOD-replaced values")
+                st.rerun()
+        else:
+            st.caption("Click the button above to generate a ZIP with all figures, data, and reports.")
     
     st.markdown("---")
     st.markdown("#### Summary Figure")
