@@ -1141,9 +1141,15 @@ class SphingolipidVisualizer:
         ax.set_xticklabels(a_levels)
         ax.set_xlabel(fa_name)
         ax.set_ylabel(ylabel)
-        ax.legend(title=fb_name, loc='best', framealpha=0.9)
-        
-        # Add ANOVA p-value text annotation
+
+        # Add post-hoc significance brackets FIRST (they expand y-axis)
+        if twoway_result is not None and twoway_result.posthoc_results is not None:
+            self._add_twoway_significance_bars(
+                ax, df, value_col, factor_a_col, factor_b_col,
+                a_levels, b_levels, bar_width, twoway_result
+            )
+
+        # Add ANOVA p-value text annotation AFTER brackets so it doesn't overlap
         if twoway_result is not None and show_anova_text:
             tw = twoway_result
             import math
@@ -1158,22 +1164,21 @@ class SphingolipidVisualizer:
                 if p is None or (isinstance(p, float) and math.isnan(p)):
                     return 'N/A'
                 return f"{p:.3f}"
-            
+
             anova_text = (
                 f"{tw.factor_a_name}: p={_fmt_p(tw.factor_a_pvalue)} {_stars(tw.factor_a_pvalue)}\n"
                 f"{tw.factor_b_name}: p={_fmt_p(tw.factor_b_pvalue)} {_stars(tw.factor_b_pvalue)}\n"
                 f"{tw.factor_a_name}×{tw.factor_b_name}: p={_fmt_p(tw.interaction_pvalue)} {_stars(tw.interaction_pvalue)}"
             )
+            # Add padding above brackets for the text box
+            y_lo, y_hi = ax.get_ylim()
+            ax.set_ylim(top=y_hi + (y_hi - y_lo) * 0.15)
             ax.text(0.02, 0.98, anova_text, transform=ax.transAxes,
                     fontsize=7, verticalalignment='top', fontfamily='monospace',
                     bbox=dict(boxstyle='round,pad=0.3', facecolor='wheat', alpha=0.8))
-        
-        # Add post-hoc significance brackets
-        if twoway_result is not None and twoway_result.posthoc_results is not None:
-            self._add_twoway_significance_bars(
-                ax, df, value_col, factor_a_col, factor_b_col,
-                a_levels, b_levels, bar_width, twoway_result
-            )
+
+        # Legend always top-right, outside data area
+        ax.legend(title=fb_name, loc='upper right', framealpha=0.9)
         
         if title:
             ax.set_title(title, fontsize=10)

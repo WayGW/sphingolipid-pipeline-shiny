@@ -201,7 +201,11 @@ class StatisticalAnalyzer:
         if len(data) < self.min_sample_for_normality:
             # Not enough data to test
             return np.nan, np.nan, True  # Assume normal if can't test
-        
+
+        if np.ptp(data) == 0:
+            # Constant values (zero variance) - normality is undefined, skip test
+            return np.nan, np.nan, True
+
         if len(data) > 5000:
             # For large samples, use D'Agostino-Pearson
             try:
