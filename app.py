@@ -249,6 +249,40 @@ def store_figure(fig, name):
     st.session_state.figures[name] = fig
 
 
+def get_top_analytes(processed, n=10):
+    """Get top N analytes by mean concentration, excluding LOD-saturated species.
+
+    Species where >80% of values were LOD-replaced are excluded from
+    selection since their mean is artificial (driven by LOD value, not biology).
+    Falls back to simple mean ranking if all species are LOD-saturated.
+    """
+    conc = processed.concentrations
+    lod_counts = processed.structure.analyte_lod_counts
+    n_samples = len(conc)
+
+    if n_samples == 0:
+        return conc.mean().nlargest(n).index.tolist()
+
+    # Filter out species where >80% of values are LOD-replaced
+    valid_cols = []
+    for col in conc.columns:
+        n_lod = lod_counts.get(col, 0)
+        if n_lod / n_samples <= 0.8:
+            valid_cols.append(col)
+
+    if len(valid_cols) >= n:
+        return conc[valid_cols].mean().nlargest(n).index.tolist()
+    elif valid_cols:
+        # Not enough valid columns, use all valid + fill from remainder
+        remaining = [c for c in conc.columns if c not in valid_cols]
+        top_valid = conc[valid_cols].mean().nlargest(len(valid_cols)).index.tolist()
+        top_remaining = conc[remaining].mean().nlargest(n - len(valid_cols)).index.tolist()
+        return top_valid + top_remaining
+    else:
+        # All species are LOD-saturated, fall back to simple mean
+        return conc.mean().nlargest(n).index.tolist()
+
+
 def compute_all_statistics(processed, settings):
     """Compute all statistics once and cache."""
     if st.session_state.stats_computed:
@@ -322,7 +356,7 @@ def generate_all_export_figures(processed, results, settings):
         
         # --- Concentrations ---
         conc_selections = {
-            'top10': processed.concentrations.mean().nlargest(10).index.tolist(),
+            'top10': get_top_analytes(processed, 10),
             'significant': [s for s in available_sls if s in results.twoway_individual_sl
                            and (results.twoway_individual_sl[s].twoway_result.factor_a_pvalue < settings['alpha']
                                 or results.twoway_individual_sl[s].twoway_result.factor_b_pvalue < settings['alpha']
@@ -468,7 +502,7 @@ def generate_all_export_figures(processed, results, settings):
         
         # === CONCENTRATIONS TAB FIGURES ===
         conc_selections = {
-            'top10': processed.concentrations.mean().nlargest(10).index.tolist(),
+            'top10': get_top_analytes(processed, 10),
             'significant': [s for s in available_sls if s in results.individual_sl_results 
                            and results.individual_sl_results[s].main_test.significant][:10],
             'ceramides': [s for s in get_ceramides() if s in available_sls][:10],
@@ -704,7 +738,7 @@ def render_concentrations_tab(processed, settings):
         quick = st.selectbox("Quick select", ["Top 10", "Significant", "Ceramides", "Sphingomyelins", "Custom"])
     
     if quick == "Top 10":
-        selected = processed.concentrations.mean().nlargest(10).index.tolist()
+        selected = get_top_analytes(processed, 10)
     elif quick == "Significant":
         if is_twoway:
             selected = [s for s in available_sls if s in results.twoway_individual_sl
@@ -716,7 +750,7 @@ def render_concentrations_tab(processed, settings):
                        and results.individual_sl_results[s].main_test.significant][:10]
         if not selected:
             st.info("No significant individual sphingolipids found.")
-            selected = processed.concentrations.mean().nlargest(5).index.tolist()
+            selected = get_top_analytes(processed, 5)
     elif quick == "Ceramides":
         selected = [s for s in get_ceramides() if s in available_sls][:10]
     elif quick == "Sphingomyelins":
