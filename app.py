@@ -585,10 +585,10 @@ def create_results_zip(processed, results, figures, report_gen, metadata):
             excel_buf.seek(0)
             zf.writestr('reports/statistical_report.xlsx', excel_buf.getvalue())
         
-        # Figures (PNG only at 150 DPI for fast export; individual PDFs available via tab downloads)
+        # Figures as PDF (vector format for publication quality)
         for name, fig in figures.items():
             if fig:
-                zf.writestr(f'figures/{name}.png', fig_to_bytes(fig, 'png', dpi=150))
+                zf.writestr(f'figures/{name}.pdf', fig_to_bytes(fig, 'pdf'))
         
         # README
         readme_content = f"""Sphingolipid Analysis Results

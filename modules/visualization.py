@@ -1118,8 +1118,7 @@ class SphingolipidVisualizer:
 
         if plot_type == "box":
             sns.boxplot(data=df, x=factor_a_col, y=value_col, hue=factor_b_col,
-                       ax=ax, palette=palette_dict, order=a_levels, hue_order=b_levels,
-                       legend=False)
+                       ax=ax, palette=palette_dict, order=a_levels, hue_order=b_levels)
             if show_points:
                 sns.stripplot(data=df, x=factor_a_col, y=value_col, hue=factor_b_col,
                              ax=ax, dodge=True, color='black', alpha=0.6, size=4,
@@ -1128,7 +1127,7 @@ class SphingolipidVisualizer:
         elif plot_type == "violin":
             sns.violinplot(data=df, x=factor_a_col, y=value_col, hue=factor_b_col,
                           ax=ax, palette=palette_dict, order=a_levels, hue_order=b_levels,
-                          inner=None, legend=False)
+                          inner=None)
             if show_points:
                 sns.stripplot(data=df, x=factor_a_col, y=value_col, hue=factor_b_col,
                              ax=ax, dodge=True, color='black', alpha=0.6, size=4,
