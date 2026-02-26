@@ -1085,60 +1085,80 @@ class SphingolipidVisualizer:
         show_points: bool = True,
         title: Optional[str] = None,
         show_anova_text: bool = True,
+        plot_type: str = "bar",
     ) -> plt.Axes:
         """
-        Create grouped bar plot for two-way ANOVA.
-        
+        Create grouped plot for two-way ANOVA.
+
         Factor A on x-axis, Factor B as hue/color with legend.
-        Bars are dodged (side-by-side) with error bars showing SEM.
-        Follows GraphPad Prism / peer-reviewed literature conventions.
+        Supports bar, box, and violin plot types.
         """
         if ax is None:
             fig, ax = plt.subplots(figsize=self.figsize_single)
-        
+
         fa_name = factor_a_name or factor_a_col
         fb_name = factor_b_name or factor_b_col
-        
+
         # Clean data
         df = data[[value_col, factor_a_col, factor_b_col]].dropna().copy()
         df[value_col] = pd.to_numeric(df[value_col], errors='coerce')
         df = df.dropna()
-        
+
         # Get ordered levels
         a_levels = sorted(df[factor_a_col].unique())
         b_levels = sorted(df[factor_b_col].unique())
         n_a = len(a_levels)
         n_b = len(b_levels)
-        
-        # Bar positioning
+
+        # Bar positioning (used for bar plot and significance brackets)
         bar_width = 0.8 / n_b
         x_base = np.arange(n_a)
         palette = self.group_palette[:n_b]
-        
-        for j, b_level in enumerate(b_levels):
-            x_pos = x_base + (j - (n_b - 1) / 2) * bar_width
-            means = []
-            sems = []
-            for a_level in a_levels:
-                cell = df[(df[factor_a_col] == a_level) & (df[factor_b_col] == b_level)][value_col]
-                means.append(cell.mean() if len(cell) > 0 else 0)
-                sems.append(cell.sem() if len(cell) > 1 else 0)
-            
-            ax.bar(x_pos, means, width=bar_width * 0.9, yerr=sems,
-                   capsize=3, color=palette[j], edgecolor='black', linewidth=0.5,
-                   label=str(b_level), zorder=2)
-            
-            # Overlay individual data points
+        palette_dict = dict(zip(b_levels, palette))
+
+        if plot_type == "box":
+            sns.boxplot(data=df, x=factor_a_col, y=value_col, hue=factor_b_col,
+                       ax=ax, palette=palette_dict, order=a_levels, hue_order=b_levels,
+                       legend=False)
             if show_points:
-                for i, a_level in enumerate(a_levels):
-                    cell_vals = df[(df[factor_a_col] == a_level) & (df[factor_b_col] == b_level)][value_col]
-                    if len(cell_vals) > 0:
-                        jitter = np.random.normal(0, bar_width * 0.08, len(cell_vals))
-                        ax.scatter(x_pos[i] + jitter, cell_vals, color='black', alpha=0.6,
-                                   s=20, zorder=10, edgecolors='white', linewidths=0.3)
-        
-        ax.set_xticks(x_base)
-        ax.set_xticklabels(a_levels)
+                sns.stripplot(data=df, x=factor_a_col, y=value_col, hue=factor_b_col,
+                             ax=ax, dodge=True, color='black', alpha=0.6, size=4,
+                             order=a_levels, hue_order=b_levels, legend=False,
+                             jitter=0.15, zorder=10, edgecolor='white', linewidth=0.3)
+        elif plot_type == "violin":
+            sns.violinplot(data=df, x=factor_a_col, y=value_col, hue=factor_b_col,
+                          ax=ax, palette=palette_dict, order=a_levels, hue_order=b_levels,
+                          inner=None, legend=False)
+            if show_points:
+                sns.stripplot(data=df, x=factor_a_col, y=value_col, hue=factor_b_col,
+                             ax=ax, dodge=True, color='black', alpha=0.6, size=4,
+                             order=a_levels, hue_order=b_levels, legend=False,
+                             jitter=0.15, zorder=10, edgecolor='white', linewidth=0.3)
+        else:  # "bar"
+            for j, b_level in enumerate(b_levels):
+                x_pos = x_base + (j - (n_b - 1) / 2) * bar_width
+                means = []
+                sems = []
+                for a_level in a_levels:
+                    cell = df[(df[factor_a_col] == a_level) & (df[factor_b_col] == b_level)][value_col]
+                    means.append(cell.mean() if len(cell) > 0 else 0)
+                    sems.append(cell.sem() if len(cell) > 1 else 0)
+
+                ax.bar(x_pos, means, width=bar_width * 0.9, yerr=sems,
+                       capsize=3, color=palette[j], edgecolor='black', linewidth=0.5,
+                       label=str(b_level), zorder=2)
+
+                if show_points:
+                    for i, a_level in enumerate(a_levels):
+                        cell_vals = df[(df[factor_a_col] == a_level) & (df[factor_b_col] == b_level)][value_col]
+                        if len(cell_vals) > 0:
+                            jitter = np.random.normal(0, bar_width * 0.08, len(cell_vals))
+                            ax.scatter(x_pos[i] + jitter, cell_vals, color='black', alpha=0.6,
+                                       s=20, zorder=10, edgecolors='white', linewidths=0.3)
+
+            ax.set_xticks(x_base)
+            ax.set_xticklabels(a_levels)
+
         ax.set_xlabel(fa_name)
         ax.set_ylabel(ylabel)
 
@@ -1384,29 +1404,30 @@ class SphingolipidVisualizer:
         factor_b_name: Optional[str] = None,
         ylabel: str = "Concentration",
         show_points: bool = True,
+        plot_type: str = "bar",
     ) -> plt.Figure:
         """
-        Create multi-panel two-way grouped bar plots with significance annotations.
-        
+        Create multi-panel two-way grouped plots with significance annotations.
+
         Equivalent to plot_multi_panel_groups_with_stats but for two-way designs.
         Each panel shows one analyte with Factor A on x-axis, Factor B as hue.
         """
         n_plots = len(value_cols)
         nrows = int(np.ceil(n_plots / ncols))
-        
+
         if figsize is None:
             figsize = (ncols * 4.5, nrows * 4.5)
-        
+
         fig, axes = plt.subplots(nrows, ncols, figsize=figsize)
         if n_plots == 1:
             axes = np.array([axes])
         axes = axes.flatten()
-        
+
         for i, col in enumerate(value_cols):
             if col not in data.columns:
                 axes[i].set_visible(False)
                 continue
-            
+
             tw_result = None
             if twoway_results and col in twoway_results:
                 result_obj = twoway_results[col]
@@ -1415,13 +1436,14 @@ class SphingolipidVisualizer:
                     tw_result = result_obj.twoway_result
                 else:
                     tw_result = result_obj
-            
+
             self.plot_twoway_bar(
                 data=data, value_col=col,
                 factor_a_col=factor_a_col, factor_b_col=factor_b_col,
                 twoway_result=tw_result, ax=axes[i],
                 factor_a_name=factor_a_name, factor_b_name=factor_b_name,
                 ylabel=ylabel, show_points=show_points,
+                plot_type=plot_type,
             )
         
         # Hide empty panels

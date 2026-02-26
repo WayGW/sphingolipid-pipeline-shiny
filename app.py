@@ -343,7 +343,8 @@ def generate_all_export_figures(processed, results, settings):
                     factor_a_col=fa_col, factor_b_col=fb_col,
                     twoway_results=tw_stats, ncols=3,
                     factor_a_name=fa_name, factor_b_name=fb_name,
-                    ylabel='Concentration (ng/mL)', show_points=settings['show_points'])
+                    ylabel='Concentration (ng/mL)', show_points=settings['show_points'],
+                    plot_type=settings['plot_type'])
                 figures[f'concentrations{suffix}'] = fig
             except Exception as _e:
                 print(f'Export figure error: {_e}')
@@ -374,7 +375,8 @@ def generate_all_export_figures(processed, results, settings):
                     factor_a_col=fa_col, factor_b_col=fb_col,
                     twoway_results=tw_stats, ncols=3,
                     factor_a_name=fa_name, factor_b_name=fb_name,
-                    ylabel='Concentration (ng/mL)', show_points=settings['show_points'])
+                    ylabel='Concentration (ng/mL)', show_points=settings['show_points'],
+                    plot_type=settings['plot_type'])
                 figures['totals'] = fig
             except Exception as _e:
                 print(f'Export figure error: {_e}')
@@ -412,7 +414,8 @@ def generate_all_export_figures(processed, results, settings):
                     factor_a_col=fa_col, factor_b_col=fb_col,
                     twoway_results=tw_stats, ncols=3,
                     factor_a_name=fa_name, factor_b_name=fb_name,
-                    ylabel='% of Total SL', show_points=settings['show_points'])
+                    ylabel='% of Total SL', show_points=settings['show_points'],
+                    plot_type=settings['plot_type'])
                 figures['percentages_top10'] = fig
             except Exception as _e:
                 print(f'Export figure error: {_e}')
@@ -442,7 +445,8 @@ def generate_all_export_figures(processed, results, settings):
                     factor_a_col=fa_col, factor_b_col=fb_col,
                     twoway_results=tw_stats, ncols=3,
                     factor_a_name=fa_name, factor_b_name=fb_name,
-                    ylabel='Ratio', show_points=settings['show_points'])
+                    ylabel='Ratio', show_points=settings['show_points'],
+                    plot_type=settings['plot_type'])
                 figures['ratios'] = fig
             except Exception as _e:
                 print(f'Export figure error: {_e}')
@@ -581,11 +585,10 @@ def create_results_zip(processed, results, figures, report_gen, metadata):
             excel_buf.seek(0)
             zf.writestr('reports/statistical_report.xlsx', excel_buf.getvalue())
         
-        # Figures
+        # Figures (PNG only at 150 DPI for fast export; individual PDFs available via tab downloads)
         for name, fig in figures.items():
             if fig:
-                zf.writestr(f'figures/{name}.png', fig_to_bytes(fig, 'png'))
-                zf.writestr(f'figures/{name}.pdf', fig_to_bytes(fig, 'pdf'))
+                zf.writestr(f'figures/{name}.png', fig_to_bytes(fig, 'png', dpi=150))
         
         # README
         readme_content = f"""Sphingolipid Analysis Results
@@ -742,7 +745,8 @@ def render_concentrations_tab(processed, settings):
                 factor_a_col=fa_col, factor_b_col=fb_col,
                 twoway_results=tw_stats, ncols=3,
                 factor_a_name=fa_name, factor_b_name=fb_name,
-                ylabel='Concentration (ng/mL)', show_points=settings['show_points']
+                ylabel='Concentration (ng/mL)', show_points=settings['show_points'],
+                plot_type=settings['plot_type']
             )
             st.pyplot(fig)
             store_figure(fig, 'concentrations_twoway')
@@ -816,7 +820,8 @@ def render_totals_tab(processed, settings):
             factor_a_col=fa_col, factor_b_col=fb_col,
             twoway_results=tw_stats, ncols=3,
             factor_a_name=results.factor_a_name, factor_b_name=results.factor_b_name,
-            ylabel='Concentration (ng/mL)', show_points=settings['show_points']
+            ylabel='Concentration (ng/mL)', show_points=settings['show_points'],
+            plot_type=settings['plot_type']
         )
         st.pyplot(fig)
         store_figure(fig, 'totals_twoway')
@@ -974,7 +979,8 @@ def render_percentages_tab(processed, settings):
                 factor_a_col=fa_col, factor_b_col=fb_col,
                 twoway_results=tw_stats, ncols=3,
                 factor_a_name=fa_name, factor_b_name=fb_name,
-                ylabel='% of Total SL', show_points=settings['show_points']
+                ylabel='% of Total SL', show_points=settings['show_points'],
+                plot_type=settings['plot_type']
             )
             st.pyplot(fig)
             store_figure(fig, 'percentages_twoway')
@@ -1256,7 +1262,8 @@ def render_ratios_tab(processed, settings):
                 factor_a_col=fa_col, factor_b_col=fb_col,
                 twoway_results=tw_stats, ncols=3,
                 factor_a_name=fa_name, factor_b_name=fb_name,
-                ylabel='Ratio', show_points=settings['show_points']
+                ylabel='Ratio', show_points=settings['show_points'],
+                plot_type=settings['plot_type']
             )
             st.pyplot(fig)
             store_figure(fig, 'ratios_twoway')
