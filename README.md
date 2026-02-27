@@ -107,11 +107,11 @@ SPHINGOLIPID_PANEL["NEW_S"] = SphingolipidSpecies(
 
 The pipeline automatically selects tests based on data characteristics:
 
-| Condition | 2 Groups | >2 Groups |
-|-----------|----------|-----------|
-| Normal + Equal variance | Independent t-test | One-way ANOVA |
-| Normal + Unequal variance | Welch's t-test | Welch's ANOVA |
-| Non-normal | Mann-Whitney U | Kruskal-Wallis |
+| Condition | 2 Groups | >2 Groups | >2 Independent Variables |
+|-----------|----------|-----------|-----------|
+| Normal + Equal variance | Independent t-test | One-way ANOVA | Two-way ANOVA |
+| Normal + Unequal variance | Welch's t-test | Welch's ANOVA | ART ANOVA |
+| Non-normal | Mann-Whitney U | Kruskal-Wallis | ART ANOVA | ART ANOVA |
 
 Post-hoc tests (for >2 groups):
 - Tukey HSD (parametric, equal variance)
