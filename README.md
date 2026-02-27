@@ -107,7 +107,7 @@ SPHINGOLIPID_PANEL["NEW_S"] = SphingolipidSpecies(
 
 The pipeline automatically selects tests based on data characteristics:
 
-| Condition | 2 Groups | >2 Groups | >2 Independent Variables |
+| Condition | 2 Groups | >2 Groups | >=2 Independent Variables |
 |-----------|----------|-----------|-----------|
 | Normal + Equal variance | Independent t-test | One-way ANOVA | Two-way ANOVA |
 | Normal + Unequal variance | Welch's t-test | Welch's ANOVA | ART ANOVA |
