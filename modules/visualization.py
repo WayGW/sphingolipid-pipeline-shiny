@@ -158,7 +158,19 @@ class SphingolipidVisualizer:
             if show_points:
                 sns.stripplot(data=data, x=group_col, y=plot_col, ax=ax,
                             color='black', alpha=0.5, size=4, order=groups)
-                
+        elif plot_type == "strip":
+            sns.stripplot(data=data, x=group_col, y=plot_col, ax=ax,
+                         hue=group_col, palette=palette, order=groups,
+                         size=6, alpha=0.7, legend=False)
+            # Add mean ± SEM lines
+            means = data.groupby(group_col)[plot_col].mean()
+            sems = data.groupby(group_col)[plot_col].sem()
+            for i, g in enumerate(groups):
+                if g in means.index:
+                    ax.hlines(means[g], i - 0.25, i + 0.25, color='black', linewidth=1.5, zorder=5)
+                    ax.errorbar(i, means[g], yerr=sems[g], color='black',
+                               capsize=5, capthick=1.5, linewidth=1.5, fmt='none', zorder=5)
+
         elif plot_type == "violin":
             sns.violinplot(data=data, x=group_col, y=plot_col, ax=ax,
                           hue=group_col, palette=palette, order=groups, 
@@ -316,7 +328,7 @@ class SphingolipidVisualizer:
             log_scale: Whether to log10 transform the data
             reference_line: Y value for reference line (default None)
             figsize: Figure size
-            plot_type: 'violin', 'box', or 'bar'
+            plot_type: 'violin', 'box', 'bar', or 'strip'
             show_points: Whether to show individual data points
             significance_pairs: List of (group1, group2, annotation) for significance brackets
         """
@@ -368,7 +380,20 @@ class SphingolipidVisualizer:
                 sns.stripplot(data=data, x=group_col, y=plot_col, ax=ax,
                              hue=group_col, palette=colors, order=groups,
                              size=4, alpha=0.6, legend=False)
-                             
+
+        elif plot_type == "strip":
+            sns.stripplot(data=data, x=group_col, y=plot_col, ax=ax,
+                         hue=group_col, palette=colors, order=groups,
+                         size=6, alpha=0.7, legend=False)
+            # Add mean ± SEM lines
+            means = data.groupby(group_col)[plot_col].mean()
+            sems = data.groupby(group_col)[plot_col].sem()
+            for i, g in enumerate(groups):
+                if g in means.index:
+                    ax.hlines(means[g], i - 0.25, i + 0.25, color='black', linewidth=1.5, zorder=5)
+                    ax.errorbar(i, means[g], yerr=sems[g], color='black',
+                               capsize=5, capthick=1.5, linewidth=1.5, fmt='none', zorder=5)
+
         elif plot_type == "bar":
             sns.barplot(data=data, x=group_col, y=plot_col, ax=ax,
                        hue=group_col, palette=colors, order=groups, 
@@ -436,6 +461,18 @@ class SphingolipidVisualizer:
                 sns.violinplot(data=data, x=group_col, y=col, ax=axes[i],
                              hue=group_col, palette=palette, order=groups, 
                              inner='box', legend=False)
+            elif plot_type == "strip":
+                sns.stripplot(data=data, x=group_col, y=col, ax=axes[i],
+                             hue=group_col, palette=palette, order=groups,
+                             size=6, alpha=0.7, legend=False)
+                # Add mean ± SEM lines
+                grp_means = data.groupby(group_col)[col].mean()
+                grp_sems = data.groupby(group_col)[col].sem()
+                for j, g in enumerate(groups):
+                    if g in grp_means.index:
+                        axes[i].hlines(grp_means[g], j - 0.25, j + 0.25, color='black', linewidth=1.5, zorder=5)
+                        axes[i].errorbar(j, grp_means[g], yerr=grp_sems[g], color='black',
+                                        capsize=5, capthick=1.5, linewidth=1.5, fmt='none', zorder=5)
             elif plot_type == "bar":
                 means = data.groupby(group_col)[col].mean()
                 sems = data.groupby(group_col)[col].sem()
@@ -486,7 +523,7 @@ class SphingolipidVisualizer:
             stats_results: Dict of statistical results keyed by column name
             ncols: Number of columns in grid
             figsize: Figure size
-            plot_type: 'box', 'violin', or 'bar'
+            plot_type: 'box', 'violin', 'strip', or 'bar'
             sharey: Share y-axis across panels
             max_sig_bars: Maximum significance bars to show per panel
             log_scale: Whether to log10 transform the data for plotting
@@ -547,6 +584,18 @@ class SphingolipidVisualizer:
                     sns.stripplot(data=plot_data, x=group_col, y=plot_col, ax=ax,
                                 color='black', alpha=0.7, size=6, order=groups,
                                 jitter=0.15, zorder=10, edgecolor='white', linewidth=0.5)
+            elif plot_type == "strip":
+                sns.stripplot(data=plot_data, x=group_col, y=plot_col, ax=ax,
+                             hue=group_col, palette=palette, order=groups,
+                             size=6, alpha=0.7, legend=False)
+                # Add mean ± SEM lines
+                grp_means = plot_data.groupby(group_col)[plot_col].mean()
+                grp_sems = plot_data.groupby(group_col)[plot_col].sem()
+                for j, g in enumerate(groups):
+                    if g in grp_means.index:
+                        ax.hlines(grp_means[g], j - 0.25, j + 0.25, color='black', linewidth=1.5, zorder=5)
+                        ax.errorbar(j, grp_means[g], yerr=grp_sems[g], color='black',
+                                   capsize=5, capthick=1.5, linewidth=1.5, fmt='none', zorder=5)
             elif plot_type == "bar":
                 means = plot_data.groupby(group_col)[plot_col].mean()
                 sems = plot_data.groupby(group_col)[plot_col].sem()
@@ -645,7 +694,7 @@ class SphingolipidVisualizer:
             stats_results: Dict mapping value_col names to StatisticalResult objects
             title: Plot title
             ylabel: Y-axis label
-            plot_type: 'bar', 'box', or 'violin'
+            plot_type: 'bar', 'box', 'strip', or 'violin'
             figsize: Figure size
             log_scale: Whether to log10 transform the data
             
@@ -702,6 +751,24 @@ class SphingolipidVisualizer:
         elif plot_type == 'violin':
             sns.violinplot(data=plot_data, x='_Group_', y='Value', hue='_Type_',
                           ax=ax, palette=palette, order=groups, inner='box')
+        elif plot_type == 'strip':
+            sns.stripplot(data=plot_data, x='_Group_', y='Value', hue='_Type_',
+                         ax=ax, palette=palette, order=groups, size=6, alpha=0.7)
+            # Add mean ± SEM lines for each type within each group
+            x = np.arange(n_groups)
+            width = 0.8 / n_types
+            for t_idx, label in enumerate(value_labels):
+                offset = (t_idx - n_types / 2 + 0.5) * width
+                type_data = plot_data[plot_data['_Type_'] == label]
+                for g_idx, group in enumerate(groups):
+                    cell = type_data[type_data['_Group_'] == group]['Value']
+                    if len(cell) > 0:
+                        m, s = cell.mean(), cell.sem()
+                        xpos = x[g_idx] + offset
+                        ax.hlines(m, xpos - width * 0.35, xpos + width * 0.35,
+                                 color='black', linewidth=1.5, zorder=5)
+                        ax.errorbar(xpos, m, yerr=s, color='black',
+                                   capsize=4, capthick=1.5, linewidth=1.5, fmt='none', zorder=5)
         else:  # bar
             sns.barplot(data=plot_data, x='_Group_', y='Value', hue='_Type_',
                        ax=ax, palette=palette, order=groups, capsize=0.1)
@@ -1091,7 +1158,7 @@ class SphingolipidVisualizer:
         Create grouped plot for two-way ANOVA.
 
         Factor A on x-axis, Factor B as hue/color with legend.
-        Supports bar, box, and violin plot types.
+        Supports bar, box, strip, and violin plot types.
         """
         if ax is None:
             fig, ax = plt.subplots(figsize=self.figsize_single)
@@ -1133,6 +1200,21 @@ class SphingolipidVisualizer:
                              ax=ax, dodge=True, color='black', alpha=0.6, size=4,
                              order=a_levels, hue_order=b_levels, legend=False,
                              jitter=0.15, zorder=10, edgecolor='white', linewidth=0.3)
+        elif plot_type == "strip":
+            sns.stripplot(data=df, x=factor_a_col, y=value_col, hue=factor_b_col,
+                         ax=ax, dodge=True, palette=palette_dict, order=a_levels, hue_order=b_levels,
+                         size=4, alpha=0.6)
+            # Add mean ± SEM lines for each factor_b level within each factor_a level
+            for j, b_level in enumerate(b_levels):
+                x_pos = x_base + (j - (n_b - 1) / 2) * bar_width
+                for i_a, a_level in enumerate(a_levels):
+                    cell = df[(df[factor_a_col] == a_level) & (df[factor_b_col] == b_level)][value_col]
+                    if len(cell) > 0:
+                        m, s = cell.mean(), cell.sem() if len(cell) > 1 else 0
+                        ax.hlines(m, x_pos[i_a] - bar_width * 0.35, x_pos[i_a] + bar_width * 0.35,
+                                 color='black', linewidth=1.5, zorder=5)
+                        ax.errorbar(x_pos[i_a], m, yerr=s, color='black',
+                                   capsize=4, capthick=1.5, linewidth=1.5, fmt='none', zorder=5)
         else:  # "bar"
             for j, b_level in enumerate(b_levels):
                 x_pos = x_base + (j - (n_b - 1) / 2) * bar_width
