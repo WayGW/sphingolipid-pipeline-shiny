@@ -628,10 +628,7 @@ class SphingolipidVisualizer:
                 ax.set_title(col, fontsize=10)
             
             ax.set_xlabel('')
-            if log_scale:
-                ax.set_ylabel(f'log₁₀({ylabel})')
-            else:
-                ax.set_ylabel(ylabel)
+            ax.set_ylabel(ylabel)
             ax.tick_params(axis='x', rotation=45)
         
         for i in range(n_plots, len(axes)):
