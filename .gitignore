@@ -16,6 +16,9 @@ env/
 .DS_Store
 Thumbs.db
 
+# Shiny deployment
+rsconnect-python/
+
 # Data files (optional)
 *.xlsx
 *.xls
