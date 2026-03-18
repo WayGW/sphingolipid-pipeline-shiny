@@ -26,15 +26,12 @@ pip install -r requirements.txt
 
 ## Usage
 
-### Web Application
-[https://sphingolipid-pipeline.streamlit.app/](https://sphingolipid-analysis-pipeline-ej8tup4wgi3arlzba7uhmb.streamlit.app/)
-
 ### For Local Hosting
 ```bash
-streamlit run app.py
+shiny run app.py --launch-browser
 ```
 
-Then open http://localhost:8501 in your browser.
+Then open http://127.0.0.1:8000 in your browser (or use the `--launch-browser` flag to open it automatically).
 
 
 ## Data Format
@@ -141,7 +138,7 @@ Post-hoc tests (for >2 groups):
 
 ```
 sphingolipid-analysis-pipeline/
-├── app.py                  # Streamlit web application
+├── app.py                  # Shiny for Python web application
 ├── requirements.txt        # Python dependencies
 ├── README.md              # This file
 ├── config/
